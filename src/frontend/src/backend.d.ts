@@ -109,6 +109,7 @@ export interface backendInterface {
     deactivatePolicy(id: string): Promise<void>;
     deleteMember(id: string): Promise<void>;
     destroySession(token: string): Promise<void>;
+    getAboutText(): Promise<string>;
     getAllBroadcasts(): Promise<Array<Broadcast>>;
     getAllDMs(): Promise<Array<DM>>;
     getAllFacilities(): Promise<Array<Facility>>;
@@ -120,6 +121,7 @@ export interface backendInterface {
     getCallerUserRole(): Promise<UserRole>;
     getDM(id: string): Promise<DM>;
     getFacility(id: string): Promise<Facility>;
+    getFeaturesList(): Promise<Array<string>>;
     getMember(id: string): Promise<Member>;
     getMemberByQrId(qrId: string): Promise<Member | null>;
     getPasswords(): Promise<[string, string]>;
@@ -133,7 +135,9 @@ export interface backendInterface {
     sendDM(fromMemberId: string, toMemberId: string, content: string): Promise<void>;
     setMemberIdCard(memberId: string, imageDataUrl: string): Promise<void>;
     setPasswords(p1: string, p2: string): Promise<void>;
+    updateAboutText(newText: string): Promise<void>;
     updateFacilityStatus(id: string, status: FacilityStatus): Promise<void>;
+    updateFeaturesList(newFeatures: Array<string>): Promise<void>;
     updateMember(id: string, name: string, email: string, role: Role): Promise<void>;
     updatePolicy(id: string, title: string, content: string): Promise<void>;
     validateSession(token: string): Promise<SessionData | null>;

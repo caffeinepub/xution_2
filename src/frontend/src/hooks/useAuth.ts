@@ -6,6 +6,7 @@ const SESSION_TOKEN_KEY = "xution_session_token";
 interface Session {
   type: "password" | "qr";
   memberId?: string;
+  isAdmin: boolean;
 }
 
 export function useAuth() {
@@ -61,6 +62,10 @@ export function useAuth() {
           setSession({
             type: (data.sessionType as "password" | "qr") ?? "password",
             memberId: data.memberId ?? undefined,
+            // Password logins are always admin; QR logins are admin if stored as such
+            isAdmin:
+              data.sessionType === "password" ||
+              data.sessionType === "qr-admin",
           });
         } else {
           // Invalid session – clear stored token
@@ -85,6 +90,7 @@ export function useAuth() {
 
   const isAuthenticated = session !== null;
   const currentMemberId = session?.memberId ?? null;
+  const isAdmin = session?.isAdmin ?? false;
 
   const loginWithPassword = useCallback(
     async (password: string): Promise<boolean> => {
@@ -99,7 +105,8 @@ export function useAuth() {
           } catch {
             // ignore
           }
-          setSession({ type: "password" });
+          // Password login always grants admin/Class 6 access
+          setSession({ type: "password", isAdmin: true });
         }
         return ok;
       } catch {
@@ -110,14 +117,15 @@ export function useAuth() {
   );
 
   const loginWithQr = useCallback(
-    async (memberId: string): Promise<void> => {
+    async (memberId: string, isAdminMember: boolean): Promise<void> => {
+      const sessionType = isAdminMember ? "qr-admin" : "qr";
       if (!actor) {
-        setSession({ type: "qr", memberId });
+        setSession({ type: "qr", memberId, isAdmin: isAdminMember });
         return;
       }
       try {
         const token = crypto.randomUUID();
-        await actor.createSession(token, "qr", memberId);
+        await actor.createSession(token, sessionType, memberId);
         try {
           sessionStorage.setItem(SESSION_TOKEN_KEY, token);
         } catch {
@@ -126,7 +134,7 @@ export function useAuth() {
       } catch {
         // If session creation fails, still allow login in-memory
       }
-      setSession({ type: "qr", memberId });
+      setSession({ type: "qr", memberId, isAdmin: isAdminMember });
     },
     [actor],
   );
@@ -149,6 +157,7 @@ export function useAuth() {
     isAuthenticated,
     isRestoring,
     currentMemberId,
+    isAdmin,
     loginWithPassword,
     loginWithQr,
     logout,

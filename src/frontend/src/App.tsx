@@ -3,6 +3,8 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -24,6 +26,14 @@ import {
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Toaster } from "@/components/ui/sonner";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Building2,
@@ -36,6 +46,7 @@ import {
   Pencil,
   Plus,
   Radio,
+  Receipt,
   Settings,
   Trash2,
   TrendingDown,
@@ -48,16 +59,21 @@ import { toast } from "sonner";
 import { BroadcastPriority, TransactionType } from "./backend.d";
 import { useAuthContext } from "./hooks/useAuthContext";
 import {
+  useAboutText,
   useAddFacility,
+  useAddTransaction,
   useBroadcasts,
   useCreateBroadcast,
   useFacilities,
+  useFeaturesList,
   useGetPasswords,
   useIsAdmin,
   useMembers,
   useRemoveFacility,
   useSetPasswords,
   useTransactions,
+  useUpdateAboutText,
+  useUpdateFeaturesList,
 } from "./hooks/useQueries";
 import { FacilitiesPage } from "./pages/FacilitiesPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -68,7 +84,7 @@ import {
   SelectedOfficeProvider,
   useSelectedOffice,
 } from "./utils/SelectedOfficeContext";
-import { formatDate } from "./utils/format";
+import { formatAmount, formatDate } from "./utils/format";
 import { isOfficeFacility, officeFacilityLocation } from "./utils/officeUtils";
 
 // ── AccordionSection ─────────────────────────────────────────────────────────
@@ -470,24 +486,47 @@ function OfficeSelector() {
   );
 }
 
-// ── About Section (editable) ─────────────────────────────────────────────────
+// ── About Section (editable, canister-backed) ────────────────────────────────
 
-const DEFAULT_ABOUT =
+const FALLBACK_ABOUT =
   "Xution is a private members organization management platform built on the Internet Computer. All data is stored on-chain for maximum security and availability.";
 
 function AboutSection({ isAdmin }: { isAdmin: boolean }) {
+  const { data: aboutText, isLoading } = useAboutText();
+  const updateAboutText = useUpdateAboutText();
   const [editing, setEditing] = useState(false);
-  const [about, setAbout] = useState(DEFAULT_ABOUT);
-  const [draft, setDraft] = useState(about);
+  const [draft, setDraft] = useState("");
 
-  function handleSave() {
-    setAbout(draft.trim() || DEFAULT_ABOUT);
-    setEditing(false);
+  const displayText = aboutText || FALLBACK_ABOUT;
+
+  async function handleSave() {
+    const text = draft.trim() || FALLBACK_ABOUT;
+    try {
+      await updateAboutText.mutateAsync(text);
+      toast.success("About text saved");
+      setEditing(false);
+    } catch {
+      toast.error("Failed to save about text");
+    }
   }
 
   function handleCancel() {
-    setDraft(about);
     setEditing(false);
+  }
+
+  function handleEdit() {
+    setDraft(displayText);
+    setEditing(true);
+  }
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2" data-ocid="about.loading_state">
+        <Skeleton className="w-full h-4 rounded bg-zinc-800" />
+        <Skeleton className="w-4/5 h-4 rounded bg-zinc-800" />
+        <Skeleton className="w-3/5 h-4 rounded bg-zinc-800" />
+      </div>
+    );
   }
 
   return (
@@ -507,8 +546,13 @@ function AboutSection({ isAdmin }: { isAdmin: boolean }) {
               size="sm"
               className="bg-primary text-black hover:bg-primary/90 h-7 text-xs"
               onClick={handleSave}
+              disabled={updateAboutText.isPending}
             >
-              Save
+              {updateAboutText.isPending ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                "Save"
+              )}
             </Button>
             <Button
               data-ocid="about.cancel_button"
@@ -516,6 +560,7 @@ function AboutSection({ isAdmin }: { isAdmin: boolean }) {
               variant="outline"
               className="border-zinc-700 hover:bg-zinc-800 text-zinc-300 h-7 text-xs"
               onClick={handleCancel}
+              disabled={updateAboutText.isPending}
             >
               Cancel
             </Button>
@@ -524,16 +569,13 @@ function AboutSection({ isAdmin }: { isAdmin: boolean }) {
       ) : (
         <div className="flex items-start justify-between gap-3">
           <p className="text-zinc-400 text-sm leading-relaxed flex-1">
-            {about}
+            {displayText}
           </p>
           {isAdmin && (
             <button
               data-ocid="about.edit_button"
               type="button"
-              onClick={() => {
-                setDraft(about);
-                setEditing(true);
-              }}
+              onClick={handleEdit}
               className="shrink-0 w-7 h-7 flex items-center justify-center rounded hover:bg-zinc-800 text-zinc-600 hover:text-primary transition-colors"
               title="Edit about text"
             >
@@ -546,9 +588,9 @@ function AboutSection({ isAdmin }: { isAdmin: boolean }) {
   );
 }
 
-// ── Features Section (editable) ──────────────────────────────────────────────
+// ── Features Section (editable, canister-backed) ─────────────────────────────
 
-const DEFAULT_FEATURES = [
+const FALLBACK_FEATURES = [
   "On-chain member management",
   "Secure direct messaging",
   "Facility booking & tracking",
@@ -559,19 +601,43 @@ const DEFAULT_FEATURES = [
 ];
 
 function FeaturesSection({ isAdmin }: { isAdmin: boolean }) {
+  const { data: featuresList, isLoading } = useFeaturesList();
+  const updateFeaturesList = useUpdateFeaturesList();
   const [editing, setEditing] = useState(false);
-  const [features, setFeatures] = useState<string[]>(DEFAULT_FEATURES);
-  const [draft, setDraft] = useState<string[]>(features);
+  const [draft, setDraft] = useState<string[]>([]);
 
-  function handleSave() {
+  const features =
+    featuresList && featuresList.length > 0 ? featuresList : FALLBACK_FEATURES;
+
+  async function handleSave() {
     const cleaned = draft.filter((f) => f.trim());
-    setFeatures(cleaned.length > 0 ? cleaned : DEFAULT_FEATURES);
-    setEditing(false);
+    const toSave = cleaned.length > 0 ? cleaned : FALLBACK_FEATURES;
+    try {
+      await updateFeaturesList.mutateAsync(toSave);
+      toast.success("Features saved");
+      setEditing(false);
+    } catch {
+      toast.error("Failed to save features");
+    }
   }
 
   function handleCancel() {
-    setDraft(features);
     setEditing(false);
+  }
+
+  function handleEdit() {
+    setDraft([...features]);
+    setEditing(true);
+  }
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2" data-ocid="features.loading_state">
+        {[1, 2, 3, 4].map((n) => (
+          <Skeleton key={n} className="w-full h-4 rounded bg-zinc-800" />
+        ))}
+      </div>
+    );
   }
 
   return (
@@ -618,8 +684,13 @@ function FeaturesSection({ isAdmin }: { isAdmin: boolean }) {
               size="sm"
               className="bg-primary text-black hover:bg-primary/90 h-7 text-xs"
               onClick={handleSave}
+              disabled={updateFeaturesList.isPending}
             >
-              Save
+              {updateFeaturesList.isPending ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                "Save"
+              )}
             </Button>
             <Button
               data-ocid="features.cancel_button"
@@ -627,6 +698,7 @@ function FeaturesSection({ isAdmin }: { isAdmin: boolean }) {
               variant="outline"
               className="border-zinc-700 hover:bg-zinc-800 text-zinc-300 h-7 text-xs"
               onClick={handleCancel}
+              disabled={updateFeaturesList.isPending}
             >
               Cancel
             </Button>
@@ -650,10 +722,7 @@ function FeaturesSection({ isAdmin }: { isAdmin: boolean }) {
               <button
                 data-ocid="features.edit_button"
                 type="button"
-                onClick={() => {
-                  setDraft(features);
-                  setEditing(true);
-                }}
+                onClick={handleEdit}
                 className="shrink-0 w-7 h-7 flex items-center justify-center rounded hover:bg-zinc-800 text-zinc-600 hover:text-primary transition-colors"
                 title="Edit features"
               >
@@ -905,6 +974,441 @@ function BroadcastSection() {
   );
 }
 
+// ── Transaction Type Styles ───────────────────────────────────────────────────
+
+const txTypeStyles: Record<TransactionType, string> = {
+  [TransactionType.payment]: "bg-blue-500/15 text-blue-400 border-blue-500/30",
+  [TransactionType.refund]:
+    "bg-green-500/15 text-green-400 border-green-500/30",
+  [TransactionType.fee]:
+    "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
+  [TransactionType.donation]: "bg-primary/15 text-primary border-primary/30",
+};
+
+// ── Add Transaction Dialog (Class 6) ─────────────────────────────────────────
+
+function AddTransactionDialogInline({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const addTx = useAddTransaction();
+  const { data: members } = useMembers();
+  const { data: facilities } = useFacilities();
+  const [memberId, setMemberId] = useState("");
+  const [facilityId, setFacilityId] = useState<string>("none");
+  const [amount, setAmount] = useState("");
+  const [description, setDescription] = useState("");
+  const [type, setType] = useState<TransactionType>(TransactionType.payment);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!memberId || !amount || !description.trim()) return;
+    const amountCents = Math.round(Number.parseFloat(amount) * 100);
+    if (Number.isNaN(amountCents) || amountCents <= 0) {
+      toast.error("Invalid amount");
+      return;
+    }
+    try {
+      await addTx.mutateAsync({
+        id: crypto.randomUUID(),
+        memberId,
+        facilityId: facilityId === "none" ? null : facilityId,
+        amount: BigInt(amountCents),
+        description: description.trim(),
+        type,
+      });
+      toast.success("Transaction recorded");
+      onOpenChange(false);
+      setMemberId("");
+      setFacilityId("none");
+      setAmount("");
+      setDescription("");
+      setType(TransactionType.payment);
+    } catch {
+      toast.error("Failed to add transaction");
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        data-ocid="class6tx.add.dialog"
+        className="sm:max-w-md bg-[#111111] border-zinc-800 text-white"
+      >
+        <DialogHeader>
+          <DialogTitle className="text-primary font-display tracking-widest uppercase text-sm">
+            Add Transaction
+          </DialogTitle>
+          <DialogDescription className="text-zinc-500 text-xs">
+            Record a new financial transaction for any member.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-zinc-400 uppercase tracking-wider">
+              Member
+            </Label>
+            <Select value={memberId} onValueChange={setMemberId} required>
+              <SelectTrigger
+                data-ocid="class6tx.member.select"
+                className="bg-zinc-900 border-zinc-700 text-zinc-200"
+              >
+                <SelectValue placeholder="Select member..." />
+              </SelectTrigger>
+              <SelectContent>
+                {members?.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-zinc-400 uppercase tracking-wider">
+              Facility{" "}
+              <span className="text-zinc-600 normal-case">(optional)</span>
+            </Label>
+            <Select value={facilityId} onValueChange={setFacilityId}>
+              <SelectTrigger
+                data-ocid="class6tx.facility.select"
+                className="bg-zinc-900 border-zinc-700 text-zinc-200"
+              >
+                <SelectValue placeholder="None" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None</SelectItem>
+                {facilities?.map((f) => (
+                  <SelectItem key={f.id} value={f.id}>
+                    {f.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="inline-tx-amount"
+                className="text-xs text-zinc-400 uppercase tracking-wider"
+              >
+                Amount (USD)
+              </Label>
+              <Input
+                id="inline-tx-amount"
+                data-ocid="class6tx.amount.input"
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="0.00"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                required
+                className="bg-zinc-900 border-zinc-700 text-zinc-200"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-zinc-400 uppercase tracking-wider">
+                Type
+              </Label>
+              <Select
+                value={type}
+                onValueChange={(v) => setType(v as TransactionType)}
+              >
+                <SelectTrigger
+                  data-ocid="class6tx.type.select"
+                  className="bg-zinc-900 border-zinc-700 text-zinc-200"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={TransactionType.payment}>
+                    Payment
+                  </SelectItem>
+                  <SelectItem value={TransactionType.refund}>Refund</SelectItem>
+                  <SelectItem value={TransactionType.fee}>Fee</SelectItem>
+                  <SelectItem value={TransactionType.donation}>
+                    Donation
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label
+              htmlFor="inline-tx-desc"
+              className="text-xs text-zinc-400 uppercase tracking-wider"
+            >
+              Description
+            </Label>
+            <Input
+              id="inline-tx-desc"
+              data-ocid="class6tx.description.input"
+              placeholder="Monthly membership dues..."
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              required
+              className="bg-zinc-900 border-zinc-700 text-zinc-200"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onOpenChange(false)}
+              data-ocid="class6tx.cancel_button"
+              className="border-zinc-700 hover:bg-zinc-800 text-zinc-300"
+            >
+              Cancel
+            </Button>
+            <Button
+              data-ocid="class6tx.submit_button"
+              type="submit"
+              size="sm"
+              disabled={
+                addTx.isPending || !memberId || !description.trim() || !amount
+              }
+              className="bg-primary text-black hover:bg-primary/90"
+            >
+              {addTx.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Record Transaction"
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── My Transactions Section ───────────────────────────────────────────────────
+
+function MyTransactionsSection() {
+  const { data: transactions, isLoading } = useTransactions();
+  const { currentMemberId } = useAuthContext();
+
+  const sorted = (() => {
+    if (!transactions) return [];
+    const list = currentMemberId
+      ? transactions.filter((tx) => tx.memberId === currentMemberId)
+      : [...transactions];
+    return list.sort((a, b) => Number(b.createdAt - a.createdAt));
+  })();
+
+  const showNote = !currentMemberId;
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2" data-ocid="mytx.loading_state">
+        {[1, 2, 3].map((n) => (
+          <Skeleton key={n} className="w-full h-10 rounded bg-zinc-800" />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {showNote && (
+        <div className="flex items-start gap-2 rounded bg-zinc-800/60 border border-zinc-700/40 px-3 py-2">
+          <Receipt className="w-3.5 h-3.5 text-zinc-500 mt-0.5 shrink-0" />
+          <p className="text-xs text-zinc-500 leading-relaxed">
+            Showing all transactions — log in via QR ID card to see personal
+            transactions only.
+          </p>
+        </div>
+      )}
+
+      {sorted.length === 0 ? (
+        <div
+          className="flex flex-col items-center gap-2 py-6 text-zinc-600"
+          data-ocid="mytx.empty_state"
+        >
+          <Receipt className="w-8 h-8 opacity-40" />
+          <p className="text-sm">No transactions found.</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto -mx-1">
+          <Table data-ocid="mytx.table">
+            <TableHeader>
+              <TableRow className="border-zinc-800 hover:bg-transparent">
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Date
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Description
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Type
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider text-right">
+                  Amount
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sorted.map((tx, idx) => (
+                <TableRow
+                  key={tx.id}
+                  data-ocid={`mytx.item.${idx + 1}`}
+                  className="border-zinc-800/60 hover:bg-zinc-800/30 transition-colors"
+                >
+                  <TableCell className="text-zinc-400 text-xs whitespace-nowrap">
+                    {formatDate(tx.createdAt)}
+                  </TableCell>
+                  <TableCell className="text-zinc-300 text-sm max-w-[160px] truncate">
+                    {tx.description}
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant="outline"
+                      className={`text-[10px] capitalize ${txTypeStyles[tx.type]}`}
+                    >
+                      {tx.type}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-sm font-medium text-zinc-200">
+                    {formatAmount(tx.amount)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Class 6 Transactions Section ──────────────────────────────────────────────
+
+function Class6TransactionsSection() {
+  const { data: transactions, isLoading } = useTransactions();
+  const { data: members } = useMembers();
+  const { data: facilities } = useFacilities();
+  const [addOpen, setAddOpen] = useState(false);
+
+  const memberMap = Object.fromEntries(
+    members?.map((m) => [m.id, m.name]) ?? [],
+  );
+  const facilityMap = Object.fromEntries(
+    facilities?.map((f) => [f.id, f.name]) ?? [],
+  );
+
+  const sorted = transactions
+    ? [...transactions].sort((a, b) => Number(b.createdAt - a.createdAt))
+    : [];
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2" data-ocid="class6tx.loading_state">
+        {[1, 2, 3, 4].map((n) => (
+          <Skeleton key={n} className="w-full h-10 rounded bg-zinc-800" />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-zinc-500">
+          {sorted.length} transaction{sorted.length !== 1 ? "s" : ""} total
+        </p>
+        <Button
+          data-ocid="class6tx.add_button"
+          size="sm"
+          onClick={() => setAddOpen(true)}
+          className="bg-primary text-black hover:bg-primary/90 h-7 text-xs gap-1.5"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add Transaction
+        </Button>
+      </div>
+
+      <AddTransactionDialogInline open={addOpen} onOpenChange={setAddOpen} />
+
+      {sorted.length === 0 ? (
+        <div
+          className="flex flex-col items-center gap-2 py-6 text-zinc-600"
+          data-ocid="class6tx.empty_state"
+        >
+          <Receipt className="w-8 h-8 opacity-40" />
+          <p className="text-sm">No transactions recorded yet.</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto -mx-1">
+          <Table data-ocid="class6tx.table">
+            <TableHeader>
+              <TableRow className="border-zinc-800 hover:bg-transparent">
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Member
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Facility
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Description
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Type
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider text-right">
+                  Amount
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Date
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sorted.map((tx, idx) => (
+                <TableRow
+                  key={tx.id}
+                  data-ocid={`class6tx.item.${idx + 1}`}
+                  className="border-zinc-800/60 hover:bg-zinc-800/30 transition-colors"
+                >
+                  <TableCell className="font-medium text-zinc-200 text-sm">
+                    {memberMap[tx.memberId] ?? tx.memberId}
+                  </TableCell>
+                  <TableCell className="text-zinc-500 text-sm">
+                    {tx.facilityId
+                      ? (facilityMap[tx.facilityId] ?? tx.facilityId)
+                      : "—"}
+                  </TableCell>
+                  <TableCell className="text-zinc-300 text-sm max-w-[140px] truncate">
+                    {tx.description}
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant="outline"
+                      className={`text-[10px] capitalize ${txTypeStyles[tx.type]}`}
+                    >
+                      {tx.type}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-sm font-medium text-zinc-200">
+                    {formatAmount(tx.amount)}
+                  </TableCell>
+                  <TableCell className="text-zinc-500 text-xs whitespace-nowrap">
+                    {formatDate(tx.createdAt)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main App ─────────────────────────────────────────────────────────────────
 
 function AppContent() {
@@ -1005,6 +1509,25 @@ function AppContent() {
               <FacilitiesPage />
             </div>
           </AccordionSection>
+
+          {/* My Transactions — visible to all logged-in users */}
+          <AccordionSection
+            title="My Transactions"
+            ocid="accordion.mytx.toggle"
+          >
+            <MyTransactionsSection />
+          </AccordionSection>
+
+          {/* Class 6 Transactions — admins only */}
+          {isAdmin && (
+            <AccordionSection
+              title="Class 6 Transactions"
+              titleColor="green"
+              ocid="accordion.class6tx.toggle"
+            >
+              <Class6TransactionsSection />
+            </AccordionSection>
+          )}
 
           {/* About Xution */}
           <AccordionSection title="About Xution" ocid="accordion.about.toggle">

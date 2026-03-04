@@ -13,6 +13,7 @@ import type {
   TransactionType,
 } from "../backend.d";
 import { useActor } from "./useActor";
+import { useAuthContext } from "./useAuthContext";
 
 // ── Members ─────────────────────────────────────────────────────────────────
 
@@ -323,15 +324,11 @@ export function useCreateBroadcast() {
 // ── Auth / User ───────────────────────────────────────────────────────────────
 
 export function useIsAdmin() {
-  const { actor, isFetching } = useActor();
-  return useQuery<boolean>({
-    queryKey: ["isAdmin"],
-    queryFn: async () => {
-      if (!actor) return false;
-      return actor.isCallerAdmin();
-    },
-    enabled: !!actor && !isFetching,
-  });
+  // Admin status is determined by the login method:
+  // - Password login (bacon/leviathan) always grants admin
+  // - QR login grants admin only if the scanned member is Class 6 (role=admin)
+  const { isAdmin } = useAuthContext();
+  return { data: isAdmin, isLoading: false };
 }
 
 // ── Password management ───────────────────────────────────────────────────────
@@ -379,5 +376,57 @@ export function useVerifyPassword() {
       if (!actor) throw new Error("No actor");
       return actor.verifyPassword(password);
     },
+  });
+}
+
+// ── About Text ────────────────────────────────────────────────────────────────
+
+export function useAboutText() {
+  const { actor, isFetching } = useActor();
+  return useQuery<string>({
+    queryKey: ["aboutText"],
+    queryFn: async () => {
+      if (!actor) return "";
+      return actor.getAboutText();
+    },
+    enabled: !!actor && !isFetching,
+  });
+}
+
+export function useUpdateAboutText() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (newText: string) => {
+      if (!actor) throw new Error("No actor");
+      return actor.updateAboutText(newText);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["aboutText"] }),
+  });
+}
+
+// ── Features List ─────────────────────────────────────────────────────────────
+
+export function useFeaturesList() {
+  const { actor, isFetching } = useActor();
+  return useQuery<string[]>({
+    queryKey: ["featuresList"],
+    queryFn: async () => {
+      if (!actor) return [];
+      return actor.getFeaturesList();
+    },
+    enabled: !!actor && !isFetching,
+  });
+}
+
+export function useUpdateFeaturesList() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (newFeatures: string[]) => {
+      if (!actor) throw new Error("No actor");
+      return actor.updateFeaturesList(newFeatures);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["featuresList"] }),
   });
 }

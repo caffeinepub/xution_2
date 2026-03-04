@@ -125,7 +125,8 @@ export function LoginPage() {
           return;
         }
 
-        await loginWithQr(member.id);
+        const isAdminMember = member.role === "admin";
+        await loginWithQr(member.id, isAdminMember);
         setQrStatus({ state: "success" });
       } catch {
         setQrStatus({
@@ -151,7 +152,8 @@ export function LoginPage() {
             message: `QR ID "${pendingQrText}" is not registered in this system.`,
           });
         } else {
-          await loginWithQr(member.id);
+          const isAdminMember = member.role === "admin";
+          await loginWithQr(member.id, isAdminMember);
           setQrStatus({ state: "success" });
         }
       } catch {

@@ -8,8 +8,8 @@ import Time "mo:core/Time";
 import Principal "mo:core/Principal";
 import MixinAuthorization "authorization/MixinAuthorization";
 import AccessControl "authorization/access-control";
-
 import Int "mo:core/Int";
+
 
 
 actor {
@@ -185,6 +185,17 @@ actor {
   let accessControlState = AccessControl.initState();
   include MixinAuthorization(accessControlState);
 
+  var aboutText : Text = "Xution is a community management platform designed to enhance collaboration, communication, and resource management for organizations of all sizes.";
+  var featuresList : [Text] = [
+    "Member Management",
+    "Direct Messaging",
+    "Facility Booking",
+    "Transaction Tracking",
+    "Policy Management",
+    "Broadcast Messaging",
+    "Session Management"
+  ];
+
   // USER PROFILE OPERATIONS
 
   public query ({ caller }) func getCallerUserProfile() : async ?UserProfile {
@@ -206,6 +217,30 @@ actor {
       Runtime.trap("Unauthorized: Only users can save profiles");
     };
     userProfiles.add(caller, profile);
+  };
+
+  // ABOUT AND FEATURES
+
+  public query ({ caller }) func getAboutText() : async Text {
+    aboutText;
+  };
+
+  public shared ({ caller }) func updateAboutText(newText : Text) : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #admin))) {
+      Runtime.trap("Unauthorized: Only admins can update about text");
+    };
+    aboutText := newText;
+  };
+
+  public query ({ caller }) func getFeaturesList() : async [Text] {
+    featuresList;
+  };
+
+  public shared ({ caller }) func updateFeaturesList(newFeatures : [Text]) : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #admin))) {
+      Runtime.trap("Unauthorized: Only admins can update features list");
+    };
+    featuresList := newFeatures;
   };
 
   // HELPER FUNCTIONS
@@ -339,7 +374,7 @@ actor {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can send DMs");
     };
-    
+
     // Verify caller is the sender
     let callerMemberId = getMemberIdByPrincipal(caller);
     switch (callerMemberId) {
@@ -382,7 +417,7 @@ actor {
         // Verify caller is sender or recipient or admin
         let callerMemberId = getMemberIdByPrincipal(caller);
         let isAdmin = AccessControl.isAdmin(accessControlState, caller);
-        
+
         switch (callerMemberId) {
           case (null) {
             if (not isAdmin) {
@@ -517,7 +552,7 @@ actor {
     // Verify caller is the member or an admin
     let callerMemberId = getMemberIdByPrincipal(caller);
     let isAdmin = AccessControl.isAdmin(accessControlState, caller);
-    
+
     switch (callerMemberId) {
       case (null) {
         if (not isAdmin) {
@@ -559,7 +594,7 @@ actor {
         // Verify caller is the member or an admin
         let callerMemberId = getMemberIdByPrincipal(caller);
         let isAdmin = AccessControl.isAdmin(accessControlState, caller);
-        
+
         switch (callerMemberId) {
           case (null) {
             if (not isAdmin) {

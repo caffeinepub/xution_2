@@ -192,6 +192,7 @@ export interface backendInterface {
     deactivatePolicy(id: string): Promise<void>;
     deleteMember(id: string): Promise<void>;
     destroySession(token: string): Promise<void>;
+    getAboutText(): Promise<string>;
     getAllBroadcasts(): Promise<Array<Broadcast>>;
     getAllDMs(): Promise<Array<DM>>;
     getAllFacilities(): Promise<Array<Facility>>;
@@ -203,6 +204,7 @@ export interface backendInterface {
     getCallerUserRole(): Promise<UserRole>;
     getDM(id: string): Promise<DM>;
     getFacility(id: string): Promise<Facility>;
+    getFeaturesList(): Promise<Array<string>>;
     getMember(id: string): Promise<Member>;
     getMemberByQrId(qrId: string): Promise<Member | null>;
     getPasswords(): Promise<[string, string]>;
@@ -216,7 +218,9 @@ export interface backendInterface {
     sendDM(fromMemberId: string, toMemberId: string, content: string): Promise<void>;
     setMemberIdCard(memberId: string, imageDataUrl: string): Promise<void>;
     setPasswords(p1: string, p2: string): Promise<void>;
+    updateAboutText(newText: string): Promise<void>;
     updateFacilityStatus(id: string, status: FacilityStatus): Promise<void>;
+    updateFeaturesList(newFeatures: Array<string>): Promise<void>;
     updateMember(id: string, name: string, email: string, role: Role): Promise<void>;
     updatePolicy(id: string, title: string, content: string): Promise<void>;
     validateSession(token: string): Promise<SessionData | null>;
@@ -379,6 +383,20 @@ export class Backend implements backendInterface {
             return result;
         }
     }
+    async getAboutText(): Promise<string> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getAboutText();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getAboutText();
+            return result;
+        }
+    }
     async getAllBroadcasts(): Promise<Array<Broadcast>> {
         if (this.processError) {
             try {
@@ -531,6 +549,20 @@ export class Backend implements backendInterface {
         } else {
             const result = await this.actor.getFacility(arg0);
             return from_candid_Facility_n16(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async getFeaturesList(): Promise<Array<string>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getFeaturesList();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getFeaturesList();
+            return result;
         }
     }
     async getMember(arg0: string): Promise<Member> {
@@ -721,6 +753,20 @@ export class Backend implements backendInterface {
             return result;
         }
     }
+    async updateAboutText(arg0: string): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.updateAboutText(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.updateAboutText(arg0);
+            return result;
+        }
+    }
     async updateFacilityStatus(arg0: string, arg1: FacilityStatus): Promise<void> {
         if (this.processError) {
             try {
@@ -732,6 +778,20 @@ export class Backend implements backendInterface {
             }
         } else {
             const result = await this.actor.updateFacilityStatus(arg0, to_candid_FacilityStatus_n41(this._uploadFile, this._downloadFile, arg1));
+            return result;
+        }
+    }
+    async updateFeaturesList(arg0: Array<string>): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.updateFeaturesList(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.updateFeaturesList(arg0);
             return result;
         }
     }
