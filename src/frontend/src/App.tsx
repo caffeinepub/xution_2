@@ -1,3 +1,14 @@
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +37,7 @@ import {
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Toaster } from "@/components/ui/sonner";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -36,44 +48,57 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  AlertTriangle,
   Building2,
   ChevronDown,
+  DollarSign,
   Key,
   Loader2,
+  Lock,
   LogOut,
   Mail,
+  MapPin,
   MessageSquare,
   Pencil,
   Plus,
-  Radio,
+  QrCode,
+  Radio as RadioIcon,
   Receipt,
   Settings,
   Trash2,
   TrendingDown,
   TrendingUp,
+  UserCog,
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
-import { BroadcastPriority, TransactionType } from "./backend.d";
+import { BroadcastPriority, Role, TransactionType } from "./backend.d";
+import type { Member } from "./backend.d";
 import { useAuthContext } from "./hooks/useAuthContext";
+import { useInternetIdentity } from "./hooks/useInternetIdentity";
 import {
   useAboutText,
   useAddFacility,
   useAddTransaction,
   useBroadcasts,
   useCreateBroadcast,
+  useCreateMember,
+  useDeleteMember,
   useFacilities,
   useFeaturesList,
   useGetPasswords,
   useIsAdmin,
   useMembers,
+  usePolicies,
   useRemoveFacility,
+  useSetMemberIdCard,
   useSetPasswords,
   useTransactions,
   useUpdateAboutText,
   useUpdateFeaturesList,
+  useUpdateMember,
 } from "./hooks/useQueries";
 import { FacilitiesPage } from "./pages/FacilitiesPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -85,9 +110,20 @@ import {
   useSelectedOffice,
 } from "./utils/SelectedOfficeContext";
 import { formatAmount, formatDate } from "./utils/format";
-import { isOfficeFacility, officeFacilityLocation } from "./utils/officeUtils";
+import {
+  decodeMemberEmail,
+  encodeMemberEmail,
+  getClassLabel,
+  getMemberClass,
+  getMemberXut,
+} from "./utils/memberClass";
+import {
+  isOfficeFacility,
+  makeOfficeLocation,
+  parseOfficeAddress,
+} from "./utils/officeUtils";
 
-// ── AccordionSection ─────────────────────────────────────────────────────────
+// ── AccordionSection ──────────────────────────────────────────────────────────
 
 interface AccordionSectionProps {
   title: string;
@@ -124,7 +160,6 @@ function AccordionSection({
     <div
       className={`rounded-none border-l-[3px] bg-[#111111] ${borderClass} overflow-hidden`}
     >
-      {/* Header */}
       <button
         data-ocid={ocid}
         type="button"
@@ -146,7 +181,6 @@ function AccordionSection({
         </motion.span>
       </button>
 
-      {/* Body */}
       <AnimatePresence initial={false}>
         {open && (
           <motion.div
@@ -174,9 +208,13 @@ function ActivityFeed() {
   const oneDayAgo = now - 24 * 60 * 60 * 1000;
 
   const recentTx =
-    transactions?.filter((t) => Number(t.createdAt) > oneDayAgo) ?? [];
+    transactions?.filter(
+      (t) => Number(t.createdAt) > oneDayAgo && t.memberId !== "__LOCKDOWN__",
+    ) ?? [];
   const recentBc =
-    broadcasts?.filter((b) => Number(b.createdAt) > oneDayAgo) ?? [];
+    broadcasts?.filter(
+      (b) => Number(b.createdAt) > oneDayAgo && b.title !== "__LOCKDOWN__",
+    ) ?? [];
 
   type ActivityItem = {
     id: string;
@@ -244,7 +282,9 @@ function ActivityFeed() {
               <p className="text-primary text-sm font-medium truncate leading-tight">
                 {item.title}
               </p>
-              <p className="text-zinc-500 text-xs mt-0.5">{dateStr} · Auto</p>
+              <p className="text-zinc-500 text-xs mt-0.5">
+                {dateStr} · {item.isBroadcast ? "Broadcast" : "Transaction"}
+              </p>
             </div>
             <span className={`text-base font-bold shrink-0 ${infColor}`}>
               ∞
@@ -256,7 +296,7 @@ function ActivityFeed() {
   );
 }
 
-// ── Office Selector ──────────────────────────────────────────────────────────
+// ── Office Selector ───────────────────────────────────────────────────────────
 
 function AddOfficeDialog({
   open,
@@ -267,6 +307,7 @@ function AddOfficeDialog({
 }) {
   const addFacility = useAddFacility();
   const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
   const [description, setDescription] = useState("");
 
   async function handleSubmit(e: React.FormEvent) {
@@ -277,11 +318,12 @@ function AddOfficeDialog({
         id: crypto.randomUUID(),
         name: name.trim(),
         description: description.trim(),
-        location: officeFacilityLocation(),
+        location: makeOfficeLocation(address),
       });
       toast.success("Office added");
       onOpenChange(false);
       setName("");
+      setAddress("");
       setDescription("");
     } catch {
       toast.error("Failed to add office");
@@ -295,20 +337,16 @@ function AddOfficeDialog({
         className="sm:max-w-sm bg-[#111111] border-zinc-800 text-white"
       >
         <DialogHeader>
-          <DialogTitle className="text-primary font-display tracking-widest uppercase text-sm">
+          <DialogTitle className="text-primary font-bold tracking-widest uppercase text-sm">
             Add Office
           </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 pt-2">
           <div className="space-y-1.5">
-            <Label
-              htmlFor="office-name"
-              className="text-xs text-zinc-400 uppercase tracking-wider"
-            >
+            <Label className="text-xs text-zinc-400 uppercase tracking-wider">
               Office Name
             </Label>
             <Input
-              id="office-name"
               data-ocid="office.name.input"
               placeholder="HQ, East Wing, Branch..."
               value={name}
@@ -318,15 +356,24 @@ function AddOfficeDialog({
             />
           </div>
           <div className="space-y-1.5">
-            <Label
-              htmlFor="office-description"
-              className="text-xs text-zinc-400 uppercase tracking-wider"
-            >
+            <Label className="text-xs text-zinc-400 uppercase tracking-wider">
+              Address{" "}
+              <span className="text-zinc-600 normal-case">(optional)</span>
+            </Label>
+            <Input
+              data-ocid="office.address.input"
+              placeholder="123 Main St, City..."
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              className="bg-zinc-900 border-zinc-700 text-zinc-200"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-zinc-400 uppercase tracking-wider">
               Description{" "}
               <span className="text-zinc-600 normal-case">(optional)</span>
             </Label>
             <Textarea
-              id="office-description"
               data-ocid="office.description.textarea"
               placeholder="Brief description..."
               value={description}
@@ -366,12 +413,131 @@ function AddOfficeDialog({
   );
 }
 
-function OfficeSelector() {
+function EditOfficeDialog({
+  open,
+  onOpenChange,
+  office,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  office: { id: string; name: string; location: string; description: string };
+}) {
+  const addFacility = useAddFacility();
+  const removeFacility = useRemoveFacility();
+  const currentAddress = parseOfficeAddress(office.location);
+  const [name, setName] = useState(office.name);
+  const [address, setAddress] = useState(currentAddress);
+  const [description, setDescription] = useState(office.description);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    try {
+      // Delete old + recreate with same ID (backend has no updateFacility)
+      await removeFacility.mutateAsync(office.id);
+      await addFacility.mutateAsync({
+        id: office.id,
+        name: name.trim(),
+        description: description.trim(),
+        location: makeOfficeLocation(address),
+      });
+      toast.success("Office updated");
+      onOpenChange(false);
+    } catch {
+      toast.error("Failed to update office");
+    }
+  }
+
+  const isPending = addFacility.isPending || removeFacility.isPending;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        data-ocid="office.edit.dialog"
+        className="sm:max-w-sm bg-[#111111] border-zinc-800 text-white"
+      >
+        <DialogHeader>
+          <DialogTitle className="text-primary font-bold tracking-widest uppercase text-sm">
+            Edit Office
+          </DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-zinc-400 uppercase tracking-wider">
+              Office Name
+            </Label>
+            <Input
+              data-ocid="office.edit.name.input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              className="bg-zinc-900 border-zinc-700 text-zinc-200"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-zinc-400 uppercase tracking-wider">
+              Address
+            </Label>
+            <Input
+              data-ocid="office.edit.address.input"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              className="bg-zinc-900 border-zinc-700 text-zinc-200"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-zinc-400 uppercase tracking-wider">
+              Description
+            </Label>
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={2}
+              className="bg-zinc-900 border-zinc-700 text-zinc-200"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onOpenChange(false)}
+              data-ocid="office.edit.cancel_button"
+              className="border-zinc-700 hover:bg-zinc-800 text-zinc-300"
+            >
+              Cancel
+            </Button>
+            <Button
+              data-ocid="office.edit.save_button"
+              type="submit"
+              size="sm"
+              disabled={isPending || !name.trim()}
+              className="bg-primary text-black hover:bg-primary/90"
+            >
+              {isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Save"
+              )}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function OfficeSelector({ isAdmin }: { isAdmin: boolean }) {
   const { data: facilities, isLoading } = useFacilities();
-  const { data: isAdmin } = useIsAdmin();
   const removeFacility = useRemoveFacility();
   const { selectedOfficeId, setSelectedOfficeId } = useSelectedOffice();
   const [addOpen, setAddOpen] = useState(false);
+  const [editOffice, setEditOffice] = useState<{
+    id: string;
+    name: string;
+    location: string;
+    description: string;
+  } | null>(null);
 
   const offices = (facilities ?? []).filter(isOfficeFacility);
 
@@ -423,6 +589,7 @@ function OfficeSelector() {
         <div className="space-y-1">
           {offices.map((office, idx) => {
             const isSelected = selectedOfficeId === office.id;
+            const address = parseOfficeAddress(office.location);
             return (
               <div
                 key={office.id}
@@ -449,7 +616,13 @@ function OfficeSelector() {
                     >
                       {office.name}
                     </span>
-                    {office.description && (
+                    {address && (
+                      <span className="text-xs text-zinc-600 truncate block flex items-center gap-1">
+                        <MapPin className="w-2.5 h-2.5 inline" />
+                        {address}
+                      </span>
+                    )}
+                    {!address && office.description && (
                       <span className="text-xs text-zinc-600 truncate block">
                         {office.description}
                       </span>
@@ -465,15 +638,33 @@ function OfficeSelector() {
                   )}
                 </button>
                 {isAdmin && (
-                  <button
-                    type="button"
-                    data-ocid={`office.delete_button.${idx + 1}`}
-                    onClick={() => handleDelete(office.id)}
-                    className="w-7 h-7 shrink-0 flex items-center justify-center rounded hover:bg-red-500/10 text-zinc-600 hover:text-red-400 transition-colors"
-                    title="Remove office"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    <button
+                      type="button"
+                      data-ocid={`office.edit_button.${idx + 1}`}
+                      onClick={() =>
+                        setEditOffice({
+                          id: office.id,
+                          name: office.name,
+                          location: office.location,
+                          description: office.description,
+                        })
+                      }
+                      className="w-7 h-7 flex items-center justify-center rounded hover:bg-zinc-800 text-zinc-600 hover:text-zinc-300 transition-colors"
+                      title="Edit office"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      data-ocid={`office.delete_button.${idx + 1}`}
+                      onClick={() => handleDelete(office.id)}
+                      className="w-7 h-7 flex items-center justify-center rounded hover:bg-red-500/10 text-zinc-600 hover:text-red-400 transition-colors"
+                      title="Remove office"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 )}
               </div>
             );
@@ -482,11 +673,20 @@ function OfficeSelector() {
       )}
 
       <AddOfficeDialog open={addOpen} onOpenChange={setAddOpen} />
+      {editOffice && (
+        <EditOfficeDialog
+          open={!!editOffice}
+          onOpenChange={(v) => {
+            if (!v) setEditOffice(null);
+          }}
+          office={editOffice}
+        />
+      )}
     </div>
   );
 }
 
-// ── About Section (editable, canister-backed) ────────────────────────────────
+// ── About Section ─────────────────────────────────────────────────────────────
 
 const FALLBACK_ABOUT =
   "Xution is a private members organization management platform built on the Internet Computer. All data is stored on-chain for maximum security and availability.";
@@ -508,15 +708,6 @@ function AboutSection({ isAdmin }: { isAdmin: boolean }) {
     } catch {
       toast.error("Failed to save about text");
     }
-  }
-
-  function handleCancel() {
-    setEditing(false);
-  }
-
-  function handleEdit() {
-    setDraft(displayText);
-    setEditing(true);
   }
 
   if (isLoading) {
@@ -559,7 +750,7 @@ function AboutSection({ isAdmin }: { isAdmin: boolean }) {
               size="sm"
               variant="outline"
               className="border-zinc-700 hover:bg-zinc-800 text-zinc-300 h-7 text-xs"
-              onClick={handleCancel}
+              onClick={() => setEditing(false)}
               disabled={updateAboutText.isPending}
             >
               Cancel
@@ -575,7 +766,10 @@ function AboutSection({ isAdmin }: { isAdmin: boolean }) {
             <button
               data-ocid="about.edit_button"
               type="button"
-              onClick={handleEdit}
+              onClick={() => {
+                setDraft(displayText);
+                setEditing(true);
+              }}
               className="shrink-0 w-7 h-7 flex items-center justify-center rounded hover:bg-zinc-800 text-zinc-600 hover:text-primary transition-colors"
               title="Edit about text"
             >
@@ -588,7 +782,7 @@ function AboutSection({ isAdmin }: { isAdmin: boolean }) {
   );
 }
 
-// ── Features Section (editable, canister-backed) ─────────────────────────────
+// ── Features Section ──────────────────────────────────────────────────────────
 
 const FALLBACK_FEATURES = [
   "On-chain member management",
@@ -621,15 +815,6 @@ function FeaturesSection({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
-  function handleCancel() {
-    setEditing(false);
-  }
-
-  function handleEdit() {
-    setDraft([...features]);
-    setEditing(true);
-  }
-
   if (isLoading) {
     return (
       <div className="space-y-2" data-ocid="features.loading_state">
@@ -646,7 +831,7 @@ function FeaturesSection({ isAdmin }: { isAdmin: boolean }) {
         <>
           <div className="space-y-2">
             {draft.map((f, idx) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: editing list, index is stable per session
+              // biome-ignore lint/suspicious/noArrayIndexKey: editing list index is stable per session
               <div key={idx} className="flex gap-2 items-center">
                 <Input
                   data-ocid={`features.item.${idx + 1}`}
@@ -697,7 +882,7 @@ function FeaturesSection({ isAdmin }: { isAdmin: boolean }) {
               size="sm"
               variant="outline"
               className="border-zinc-700 hover:bg-zinc-800 text-zinc-300 h-7 text-xs"
-              onClick={handleCancel}
+              onClick={() => setEditing(false)}
               disabled={updateFeaturesList.isPending}
             >
               Cancel
@@ -722,7 +907,10 @@ function FeaturesSection({ isAdmin }: { isAdmin: boolean }) {
               <button
                 data-ocid="features.edit_button"
                 type="button"
-                onClick={handleEdit}
+                onClick={() => {
+                  setDraft([...features]);
+                  setEditing(true);
+                }}
                 className="shrink-0 w-7 h-7 flex items-center justify-center rounded hover:bg-zinc-800 text-zinc-600 hover:text-primary transition-colors"
                 title="Edit features"
               >
@@ -742,6 +930,1259 @@ function FeaturesSection({ isAdmin }: { isAdmin: boolean }) {
             </a>
           </p>
         </>
+      )}
+    </div>
+  );
+}
+
+// ── Broadcast Section ─────────────────────────────────────────────────────────
+
+function BroadcastSection() {
+  const { data: members } = useMembers();
+  const { currentMemberId } = useAuthContext();
+  const createBroadcast = useCreateBroadcast();
+
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [priority, setPriority] = useState<BroadcastPriority>(
+    BroadcastPriority.normal,
+  );
+
+  const authorId = currentMemberId ?? members?.[0]?.id ?? "";
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!title.trim() || !content.trim()) return;
+    try {
+      await createBroadcast.mutateAsync({
+        id: crypto.randomUUID(),
+        title: title.trim(),
+        content: content.trim(),
+        authorId,
+        priority,
+      });
+      toast.success("Broadcast posted");
+      setTitle("");
+      setContent("");
+      setPriority(BroadcastPriority.normal);
+    } catch {
+      toast.error("Failed to post broadcast");
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <RadioIcon className="w-4 h-4 text-primary" />
+        <span className="text-xs text-zinc-400 uppercase tracking-wider font-mono">
+          Post Broadcast
+        </span>
+      </div>
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs text-zinc-500 uppercase tracking-wider font-mono">
+            Title
+          </Label>
+          <Input
+            data-ocid="broadcast.title.input"
+            placeholder="Broadcast title..."
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            required
+            className="bg-zinc-900 border-zinc-700 text-zinc-200"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs text-zinc-500 uppercase tracking-wider font-mono">
+            Message
+          </Label>
+          <Textarea
+            data-ocid="broadcast.content.textarea"
+            placeholder="Broadcast message..."
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            rows={3}
+            required
+            className="bg-zinc-900 border-zinc-700 text-zinc-200"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs text-zinc-500 uppercase tracking-wider font-mono">
+            Priority
+          </Label>
+          <Select
+            value={priority}
+            onValueChange={(v) => setPriority(v as BroadcastPriority)}
+          >
+            <SelectTrigger
+              data-ocid="broadcast.priority.select"
+              className="bg-zinc-900 border-zinc-700 text-zinc-200"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={BroadcastPriority.normal}>Normal</SelectItem>
+              <SelectItem value={BroadcastPriority.high}>High</SelectItem>
+              <SelectItem value={BroadcastPriority.urgent}>Urgent</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <Button
+          data-ocid="broadcast.submit_button"
+          type="submit"
+          disabled={
+            createBroadcast.isPending || !title.trim() || !content.trim()
+          }
+          className="w-full bg-primary text-black hover:bg-primary/90"
+        >
+          {createBroadcast.isPending ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <RadioIcon className="mr-2 h-4 w-4" />
+          )}
+          Post Broadcast
+        </Button>
+      </form>
+    </div>
+  );
+}
+
+// ── Lockdown Section ──────────────────────────────────────────────────────────
+
+interface LockdownState {
+  active: boolean;
+  message: string;
+  officeIds: string[];
+}
+
+function LockdownSection({
+  lockdownState,
+}: {
+  lockdownState: LockdownState | null;
+}) {
+  const createBroadcast = useCreateBroadcast();
+  const { data: facilities } = useFacilities();
+  const { currentMemberId } = useAuthContext();
+  const { data: members } = useMembers();
+  const authorId = currentMemberId ?? members?.[0]?.id ?? "admin";
+
+  const offices = (facilities ?? []).filter(isOfficeFacility);
+
+  const [active, setActive] = useState(lockdownState?.active ?? false);
+  const [message, setMessage] = useState(
+    lockdownState?.message ?? "Lockdown in effect. Access restricted.",
+  );
+  const [selectedOfficeIds, setSelectedOfficeIds] = useState<string[]>(
+    lockdownState?.officeIds ?? [],
+  );
+
+  function toggleOffice(id: string) {
+    setSelectedOfficeIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
+
+  async function handleSave() {
+    const payload: LockdownState = {
+      active,
+      message,
+      officeIds: selectedOfficeIds,
+    };
+    try {
+      await createBroadcast.mutateAsync({
+        id: crypto.randomUUID(),
+        title: "__LOCKDOWN__",
+        content: JSON.stringify(payload),
+        authorId,
+        priority: BroadcastPriority.urgent,
+      });
+      toast.success(active ? "Lockdown activated" : "Lockdown deactivated");
+    } catch {
+      toast.error("Failed to update lockdown");
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Lock className="w-4 h-4 text-red-400" />
+          <span className="text-sm font-bold text-red-400 uppercase tracking-wide">
+            Lockdown Control
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-zinc-500">
+            {active ? "Active" : "Inactive"}
+          </span>
+          <Switch
+            data-ocid="lockdown.toggle"
+            checked={active}
+            onCheckedChange={setActive}
+            className="data-[state=checked]:bg-red-600"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs text-zinc-400 uppercase tracking-wider">
+          Lockdown Message
+        </Label>
+        <Textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          rows={2}
+          className="bg-zinc-900 border-zinc-700 text-zinc-200 text-sm"
+          data-ocid="lockdown.textarea"
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs text-zinc-400 uppercase tracking-wider">
+          Affected Offices
+        </Label>
+        <p className="text-xs text-zinc-600">
+          Empty = all offices. Select specific offices to limit scope.
+        </p>
+        <div className="space-y-1">
+          {offices.map((office) => (
+            <label
+              key={office.id}
+              className="flex items-center gap-2 cursor-pointer py-1"
+            >
+              <input
+                type="checkbox"
+                checked={selectedOfficeIds.includes(office.id)}
+                onChange={() => toggleOffice(office.id)}
+                className="w-3.5 h-3.5 accent-red-500"
+              />
+              <span className="text-sm text-zinc-300">{office.name}</span>
+            </label>
+          ))}
+          {offices.length === 0 && (
+            <p className="text-xs text-zinc-600">
+              No offices created yet — lockdown will apply globally.
+            </p>
+          )}
+        </div>
+      </div>
+
+      <Button
+        onClick={handleSave}
+        disabled={createBroadcast.isPending}
+        data-ocid="lockdown.submit_button"
+        className={`w-full ${active ? "bg-red-600 hover:bg-red-700 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-200"}`}
+      >
+        {createBroadcast.isPending ? (
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        ) : (
+          <Lock className="mr-2 h-4 w-4" />
+        )}
+        {active ? "Activate Lockdown" : "Deactivate Lockdown"}
+      </Button>
+    </div>
+  );
+}
+
+// ── Transaction type styles ───────────────────────────────────────────────────
+
+const txTypeStyles: Record<TransactionType, string> = {
+  [TransactionType.payment]: "bg-blue-500/15 text-blue-400 border-blue-500/30",
+  [TransactionType.refund]:
+    "bg-green-500/15 text-green-400 border-green-500/30",
+  [TransactionType.fee]:
+    "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
+  [TransactionType.donation]: "bg-primary/15 text-primary border-primary/30",
+};
+
+// ── Add Transaction Dialog ────────────────────────────────────────────────────
+
+function AddTransactionDialog({
+  open,
+  onOpenChange,
+  defaultMemberId,
+  paymentOnly,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  defaultMemberId?: string;
+  paymentOnly?: boolean;
+}) {
+  const addTx = useAddTransaction();
+  const { data: members } = useMembers();
+  const { data: facilities } = useFacilities();
+  const [memberId, setMemberId] = useState(defaultMemberId ?? "");
+  const [facilityId, setFacilityId] = useState<string>("none");
+  const [amount, setAmount] = useState("");
+  const [description, setDescription] = useState("");
+  const [type, setType] = useState<TransactionType>(TransactionType.payment);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!memberId || !amount || !description.trim()) return;
+    const amountCents = Math.round(Number.parseFloat(amount) * 100);
+    if (Number.isNaN(amountCents) || amountCents <= 0) {
+      toast.error("Invalid amount");
+      return;
+    }
+    const facilityName =
+      facilityId !== "none"
+        ? facilities?.find((f) => f.id === facilityId)?.name
+        : null;
+    const locationLabel = facilityName
+      ? `[Facility: ${facilityName}]`
+      : "[Other]";
+    try {
+      await addTx.mutateAsync({
+        id: crypto.randomUUID(),
+        memberId,
+        facilityId: facilityId === "none" ? null : facilityId,
+        amount: BigInt(amountCents),
+        description: `${locationLabel} ${description.trim()}`,
+        type: paymentOnly ? TransactionType.payment : type,
+      });
+      toast.success("Transaction recorded");
+      onOpenChange(false);
+      setMemberId(defaultMemberId ?? "");
+      setFacilityId("none");
+      setAmount("");
+      setDescription("");
+      setType(TransactionType.payment);
+    } catch {
+      toast.error("Failed to add transaction");
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        data-ocid="tx.add.dialog"
+        className="sm:max-w-md bg-[#111111] border-zinc-800 text-white"
+      >
+        <DialogHeader>
+          <DialogTitle className="text-primary font-bold tracking-widest uppercase text-sm">
+            {paymentOnly ? "Add Payment" : "Add Transaction"}
+          </DialogTitle>
+          <DialogDescription className="text-zinc-500 text-xs">
+            {paymentOnly
+              ? "Record a payment for yourself."
+              : "Record a new financial transaction."}
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+          {!defaultMemberId && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-zinc-400 uppercase tracking-wider">
+                Member
+              </Label>
+              <Select value={memberId} onValueChange={setMemberId} required>
+                <SelectTrigger
+                  data-ocid="tx.member.select"
+                  className="bg-zinc-900 border-zinc-700 text-zinc-200"
+                >
+                  <SelectValue placeholder="Select member..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {members?.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label className="text-xs text-zinc-400 uppercase tracking-wider">
+              Facility{" "}
+              <span className="text-zinc-600 normal-case">(optional)</span>
+            </Label>
+            <Select value={facilityId} onValueChange={setFacilityId}>
+              <SelectTrigger
+                data-ocid="tx.facility.select"
+                className="bg-zinc-900 border-zinc-700 text-zinc-200"
+              >
+                <SelectValue placeholder="None (Other)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None (Other)</SelectItem>
+                {facilities
+                  ?.filter((f) => !isOfficeFacility(f))
+                  .map((f) => (
+                    <SelectItem key={f.id} value={f.id}>
+                      {f.name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs text-zinc-400 uppercase tracking-wider">
+                Amount ($)
+              </Label>
+              <Input
+                data-ocid="tx.amount.input"
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="0.00"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                required
+                className="bg-zinc-900 border-zinc-700 text-zinc-200"
+              />
+            </div>
+            {!paymentOnly && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-zinc-400 uppercase tracking-wider">
+                  Type
+                </Label>
+                <Select
+                  value={type}
+                  onValueChange={(v) => setType(v as TransactionType)}
+                >
+                  <SelectTrigger
+                    data-ocid="tx.type.select"
+                    className="bg-zinc-900 border-zinc-700 text-zinc-200"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={TransactionType.payment}>
+                      Payment
+                    </SelectItem>
+                    <SelectItem value={TransactionType.refund}>
+                      Refund
+                    </SelectItem>
+                    <SelectItem value={TransactionType.fee}>Fee</SelectItem>
+                    <SelectItem value={TransactionType.donation}>
+                      Donation
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-zinc-400 uppercase tracking-wider">
+              Description
+            </Label>
+            <Input
+              data-ocid="tx.description.input"
+              placeholder="Monthly membership dues..."
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              required
+              className="bg-zinc-900 border-zinc-700 text-zinc-200"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onOpenChange(false)}
+              data-ocid="tx.cancel_button"
+              className="border-zinc-700 hover:bg-zinc-800 text-zinc-300"
+            >
+              Cancel
+            </Button>
+            <Button
+              data-ocid="tx.submit_button"
+              type="submit"
+              size="sm"
+              disabled={
+                addTx.isPending ||
+                (!defaultMemberId && !memberId) ||
+                !description.trim() ||
+                !amount
+              }
+              className="bg-primary text-black hover:bg-primary/90"
+            >
+              {addTx.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Record"
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── My Transactions Section ───────────────────────────────────────────────────
+
+function MyTransactionsSection({
+  currentMemberId,
+}: { currentMemberId: string | null }) {
+  const { data: transactions, isLoading } = useTransactions();
+  const { data: facilities } = useFacilities();
+  const [addOpen, setAddOpen] = useState(false);
+
+  const facilityMap = Object.fromEntries(
+    (facilities ?? []).map((f) => [f.id, f.name]),
+  );
+
+  const sorted = (() => {
+    if (!transactions) return [];
+    const list = currentMemberId
+      ? transactions.filter((tx) => tx.memberId === currentMemberId)
+      : [...transactions];
+    return list.sort((a, b) => Number(b.createdAt - a.createdAt));
+  })();
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2" data-ocid="mytx.loading_state">
+        {[1, 2, 3].map((n) => (
+          <Skeleton key={n} className="w-full h-10 rounded bg-zinc-800" />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {currentMemberId && (
+        <Button
+          data-ocid="mytx.add_button"
+          size="sm"
+          variant="outline"
+          className="border-dashed border-primary/40 text-primary/70 hover:bg-primary/5 gap-1.5 h-8 text-xs"
+          onClick={() => setAddOpen(true)}
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add Payment
+        </Button>
+      )}
+
+      {!currentMemberId && (
+        <div className="flex items-start gap-2 rounded bg-zinc-800/60 border border-zinc-700/40 px-3 py-2">
+          <Receipt className="w-3.5 h-3.5 text-zinc-500 mt-0.5 shrink-0" />
+          <p className="text-xs text-zinc-500 leading-relaxed">
+            Log in via QR ID card to see and add personal transactions.
+          </p>
+        </div>
+      )}
+
+      {sorted.length === 0 ? (
+        <div
+          className="flex flex-col items-center gap-2 py-6 text-zinc-600"
+          data-ocid="mytx.empty_state"
+        >
+          <Receipt className="w-8 h-8 opacity-40" />
+          <p className="text-sm">No transactions yet.</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto -mx-1">
+          <Table data-ocid="mytx.table">
+            <TableHeader>
+              <TableRow className="border-zinc-800 hover:bg-transparent">
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Date
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Description
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Location
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Type
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider text-right">
+                  Amount
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sorted.map((tx, idx) => {
+                const loc = tx.facilityId
+                  ? (facilityMap[tx.facilityId] ?? "Unknown Facility")
+                  : "Other";
+                return (
+                  <TableRow
+                    key={tx.id}
+                    data-ocid={`mytx.item.${idx + 1}`}
+                    className="border-zinc-800/60 hover:bg-zinc-800/30 transition-colors"
+                  >
+                    <TableCell className="text-zinc-400 text-xs whitespace-nowrap">
+                      {formatDate(tx.createdAt)}
+                    </TableCell>
+                    <TableCell className="text-zinc-300 text-sm max-w-[140px] truncate">
+                      {tx.description}
+                    </TableCell>
+                    <TableCell className="text-zinc-500 text-xs">
+                      {loc}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="outline"
+                        className={`text-[10px] capitalize ${txTypeStyles[tx.type]}`}
+                      >
+                        {tx.type}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm font-medium text-zinc-200">
+                      {formatAmount(tx.amount)}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {currentMemberId && (
+        <AddTransactionDialog
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          defaultMemberId={currentMemberId}
+          paymentOnly
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Global Transactions ───────────────────────────────────────────────────────
+
+function GlobalTransactionsSection() {
+  const { data: transactions, isLoading } = useTransactions();
+  const { data: members } = useMembers();
+  const { data: facilities } = useFacilities();
+  const [addOpen, setAddOpen] = useState(false);
+  const [filterOffice, setFilterOffice] = useState<string>("all");
+
+  const memberMap = Object.fromEntries(
+    (members ?? []).map((m) => [m.id, m.name]),
+  );
+  const facilityMap = Object.fromEntries(
+    (facilities ?? []).map((f) => [f.id, f]),
+  );
+  const offices = (facilities ?? []).filter(isOfficeFacility);
+
+  const sorted = (() => {
+    if (!transactions) return [];
+    let list = [...transactions];
+    if (filterOffice !== "all") {
+      // Filter by transactions whose facility belongs to the selected office
+      list = list.filter((tx) => {
+        if (!tx.facilityId) return filterOffice === "none";
+        const fac = facilityMap[tx.facilityId];
+        return fac?.location === `office:${filterOffice}`;
+      });
+    }
+    return list.sort((a, b) => Number(b.createdAt - a.createdAt));
+  })();
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2" data-ocid="globaltx.loading_state">
+        {[1, 2, 3, 4].map((n) => (
+          <Skeleton key={n} className="w-full h-10 rounded bg-zinc-800" />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Select value={filterOffice} onValueChange={setFilterOffice}>
+            <SelectTrigger
+              data-ocid="globaltx.filter.select"
+              className="h-8 text-xs bg-zinc-900 border-zinc-700 text-zinc-300 w-40"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Locations</SelectItem>
+              <SelectItem value="none">No Location (Other)</SelectItem>
+              {offices.map((o) => (
+                <SelectItem key={o.id} value={o.id}>
+                  {o.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <span className="text-xs text-zinc-600">
+            {sorted.length} record{sorted.length !== 1 ? "s" : ""}
+          </span>
+        </div>
+        <Button
+          data-ocid="globaltx.add_button"
+          size="sm"
+          onClick={() => setAddOpen(true)}
+          className="bg-primary text-black hover:bg-primary/90 h-7 text-xs gap-1.5"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add Transaction
+        </Button>
+      </div>
+
+      <AddTransactionDialog open={addOpen} onOpenChange={setAddOpen} />
+
+      {sorted.length === 0 ? (
+        <div
+          className="flex flex-col items-center gap-2 py-6 text-zinc-600"
+          data-ocid="globaltx.empty_state"
+        >
+          <Receipt className="w-8 h-8 opacity-40" />
+          <p className="text-sm">No transactions recorded yet.</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto -mx-1">
+          <Table data-ocid="globaltx.table">
+            <TableHeader>
+              <TableRow className="border-zinc-800 hover:bg-transparent">
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Member
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Location
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Description
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Type
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider text-right">
+                  Amount
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Date
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sorted.map((tx, idx) => {
+                const fac = tx.facilityId ? facilityMap[tx.facilityId] : null;
+                const loc = fac ? fac.name : "Other";
+                return (
+                  <TableRow
+                    key={tx.id}
+                    data-ocid={`globaltx.item.${idx + 1}`}
+                    className="border-zinc-800/60 hover:bg-zinc-800/30 transition-colors"
+                  >
+                    <TableCell className="font-medium text-zinc-200 text-sm">
+                      {memberMap[tx.memberId] ?? tx.memberId}
+                    </TableCell>
+                    <TableCell className="text-zinc-500 text-xs">
+                      {loc}
+                    </TableCell>
+                    <TableCell className="text-zinc-300 text-sm max-w-[120px] truncate">
+                      {tx.description}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="outline"
+                        className={`text-[10px] capitalize ${txTypeStyles[tx.type]}`}
+                      >
+                        {tx.type}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm font-medium text-zinc-200">
+                      {formatAmount(tx.amount)}
+                    </TableCell>
+                    <TableCell className="text-zinc-500 text-xs whitespace-nowrap">
+                      {formatDate(tx.createdAt)}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Add Funds ─────────────────────────────────────────────────────────────────
+
+function AddFundsSection() {
+  const addTx = useAddTransaction();
+  const { data: members } = useMembers();
+  const [memberId, setMemberId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [description, setDescription] = useState("");
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!memberId || !amount) return;
+    const amountCents = Math.round(Number.parseFloat(amount) * 100);
+    if (Number.isNaN(amountCents) || amountCents <= 0) {
+      toast.error("Invalid amount");
+      return;
+    }
+    try {
+      await addTx.mutateAsync({
+        id: crypto.randomUUID(),
+        memberId,
+        facilityId: null,
+        amount: BigInt(amountCents),
+        description: `[Other] ${description.trim() || "Funds added by admin"}`,
+        type: TransactionType.donation,
+      });
+      toast.success("Funds added");
+      setMemberId("");
+      setAmount("");
+      setDescription("");
+    } catch {
+      toast.error("Failed to add funds");
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <DollarSign className="w-4 h-4 text-green-400" />
+        <span className="text-xs text-zinc-400 uppercase tracking-wider font-mono">
+          Add / Remove Funds
+        </span>
+      </div>
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs text-zinc-500 uppercase tracking-wider font-mono">
+            Member
+          </Label>
+          <Select value={memberId} onValueChange={setMemberId} required>
+            <SelectTrigger
+              data-ocid="funds.member.select"
+              className="bg-zinc-900 border-zinc-700 text-zinc-200"
+            >
+              <SelectValue placeholder="Select member..." />
+            </SelectTrigger>
+            <SelectContent>
+              {members?.map((m) => (
+                <SelectItem key={m.id} value={m.id}>
+                  {m.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs text-zinc-500 uppercase tracking-wider font-mono">
+            Amount ($)
+          </Label>
+          <Input
+            data-ocid="funds.amount.input"
+            type="number"
+            step="0.01"
+            min="0"
+            placeholder="0.00"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            required
+            className="bg-zinc-900 border-zinc-700 text-zinc-200"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs text-zinc-500 uppercase tracking-wider font-mono">
+            Note <span className="text-zinc-600 normal-case">(optional)</span>
+          </Label>
+          <Input
+            data-ocid="funds.description.input"
+            placeholder="Reason..."
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            className="bg-zinc-900 border-zinc-700 text-zinc-200"
+          />
+        </div>
+        <Button
+          data-ocid="funds.submit_button"
+          type="submit"
+          disabled={addTx.isPending || !memberId || !amount}
+          className="w-full bg-green-700 hover:bg-green-600 text-white"
+        >
+          {addTx.isPending ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <DollarSign className="mr-2 h-4 w-4" />
+          )}
+          Add Funds
+        </Button>
+      </form>
+    </div>
+  );
+}
+
+// ── Member Management (in settings) ──────────────────────────────────────────
+
+async function extractXutFromQr(file: File): Promise<string | null> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    interface BarcodeResult {
+      rawValue: string;
+    }
+    interface BarcodeDetectorInstance {
+      detect(image: ImageBitmap): Promise<BarcodeResult[]>;
+    }
+    interface BarcodeDetectorConstructor {
+      new (options: { formats: string[] }): BarcodeDetectorInstance;
+    }
+    const BarcodeDetectorCtor = (globalThis as Record<string, unknown>)
+      .BarcodeDetector as BarcodeDetectorConstructor | undefined;
+
+    let qrText: string | null = null;
+    if (BarcodeDetectorCtor) {
+      const detector = new BarcodeDetectorCtor({ formats: ["qr_code"] });
+      const codes = await detector.detect(bitmap);
+      if (codes.length > 0) {
+        qrText = codes[0].rawValue.trim();
+      }
+    }
+    bitmap.close();
+    return qrText;
+  } catch {
+    return null;
+  }
+}
+
+function MemberFormDialog({
+  open,
+  onOpenChange,
+  editMember,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  editMember?: Member;
+}) {
+  const { identity } = useInternetIdentity();
+  const createMember = useCreateMember();
+  const updateMember = useUpdateMember();
+
+  const decoded = editMember ? decodeMemberEmail(editMember.email) : null;
+
+  const [username, setUsername] = useState(editMember?.name ?? "");
+  const [memberClass, setMemberClass] = useState<number>(decoded?.class_ ?? 1);
+  const [xutNumber, setXutNumber] = useState(decoded?.xutNumber ?? "");
+  const [qrScanning, setQrScanning] = useState(false);
+  const qrInputRef = useRef<HTMLInputElement>(null);
+
+  const isEditing = !!editMember;
+  const isPending = createMember.isPending || updateMember.isPending;
+
+  async function handleQrUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setQrScanning(true);
+    try {
+      const text = await extractXutFromQr(file);
+      if (text) {
+        setXutNumber(text);
+        toast.success(`XUT number extracted: ${text}`);
+      } else {
+        toast.error("No QR code found in image");
+      }
+    } catch {
+      toast.error("Failed to read QR code");
+    } finally {
+      setQrScanning(false);
+      if (qrInputRef.current) qrInputRef.current.value = "";
+    }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!username.trim()) return;
+
+    const email = encodeMemberEmail(memberClass, xutNumber.trim());
+    const role = memberClass >= 5 ? Role.admin : Role.member;
+
+    try {
+      if (isEditing) {
+        await updateMember.mutateAsync({
+          id: editMember.id,
+          name: username,
+          email,
+          role,
+        });
+        toast.success("Member updated");
+      } else {
+        const principal = identity?.getPrincipal();
+        if (!principal) {
+          toast.error("Not authenticated");
+          return;
+        }
+        await createMember.mutateAsync({
+          id: crypto.randomUUID(),
+          name: username,
+          email,
+          role,
+          principal,
+        });
+        toast.success("Member added");
+      }
+      onOpenChange(false);
+    } catch {
+      toast.error(
+        isEditing ? "Failed to update member" : "Failed to add member",
+      );
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        data-ocid="settings.members.add.dialog"
+        className="sm:max-w-md bg-[#111111] border-zinc-800 text-white"
+      >
+        <DialogHeader>
+          <DialogTitle className="text-primary font-bold tracking-widest uppercase text-sm">
+            {isEditing ? "Edit Member" : "Add Member"}
+          </DialogTitle>
+          <DialogDescription className="text-zinc-500 text-xs">
+            {isEditing
+              ? "Update member information."
+              : "Add a new member to the organization."}
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-zinc-400 uppercase tracking-wider">
+              Username
+            </Label>
+            <Input
+              data-ocid="settings.members.name.input"
+              placeholder="JaneDoe"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+              className="bg-zinc-900 border-zinc-700 text-zinc-200"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-zinc-400 uppercase tracking-wider">
+              Class
+            </Label>
+            <select
+              value={memberClass}
+              onChange={(e) => setMemberClass(Number(e.target.value))}
+              className="w-full h-9 px-3 rounded bg-zinc-900 border border-zinc-700 text-zinc-200 text-sm"
+              data-ocid="settings.members.class.select"
+            >
+              {[1, 2, 3, 4, 5, 6].map((c) => (
+                <option key={c} value={c}>
+                  Class {c}
+                  {c >= 6 ? " (Admin)" : c === 5 ? " (Senior)" : ""}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-zinc-600">
+              Class 6 = Admin. Only Class 6 can promote/demote members.
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-zinc-400 uppercase tracking-wider">
+              QR Card{" "}
+              <span className="text-zinc-600 normal-case">
+                (auto-fills XUT#)
+              </span>
+            </Label>
+            <input
+              ref={qrInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/jpg,image/webp"
+              className="hidden"
+              onChange={handleQrUpload}
+              data-ocid="settings.members.qr_card.upload_button"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => qrInputRef.current?.click()}
+              disabled={qrScanning}
+              className="border-zinc-700 text-zinc-400 hover:bg-zinc-800 gap-2"
+            >
+              {qrScanning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <QrCode className="h-4 w-4" />
+              )}
+              {qrScanning ? "Scanning..." : "Scan QR Card"}
+            </Button>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-zinc-400 uppercase tracking-wider">
+              XUT Number
+            </Label>
+            <Input
+              data-ocid="settings.members.xut.input"
+              placeholder="XUT-001"
+              value={xutNumber}
+              onChange={(e) => setXutNumber(e.target.value)}
+              className="font-mono bg-zinc-900 border-zinc-700 text-zinc-200"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              data-ocid="settings.members.cancel_button"
+              className="border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+            >
+              Cancel
+            </Button>
+            <Button
+              data-ocid="settings.members.submit_button"
+              type="submit"
+              disabled={isPending}
+              className="bg-primary text-black hover:bg-primary/90"
+            >
+              {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {isEditing ? "Save Changes" : "Add Member"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function MemberManagementSection() {
+  const { data: members, isLoading } = useMembers();
+  const deleteMember = useDeleteMember();
+  const [addOpen, setAddOpen] = useState(false);
+  const [editMember, setEditMember] = useState<Member | undefined>();
+
+  async function handleDelete(id: string) {
+    try {
+      await deleteMember.mutateAsync(id);
+      toast.success("Member deleted");
+    } catch {
+      toast.error("Failed to delete member");
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <Button
+        data-ocid="settings.members.add_button"
+        size="sm"
+        variant="outline"
+        className="border-dashed border-primary/40 text-primary/70 hover:bg-primary/5 gap-1.5 h-8 text-xs"
+        onClick={() => setAddOpen(true)}
+      >
+        <Plus className="w-3.5 h-3.5" />
+        Add Member
+      </Button>
+
+      <MemberFormDialog open={addOpen} onOpenChange={setAddOpen} />
+      {editMember && (
+        <MemberFormDialog
+          open={!!editMember}
+          onOpenChange={(v) => {
+            if (!v) setEditMember(undefined);
+          }}
+          editMember={editMember}
+        />
+      )}
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {[1, 2, 3].map((n) => (
+            <Skeleton key={n} className="w-full h-10 bg-zinc-800" />
+          ))}
+        </div>
+      ) : !members || members.length === 0 ? (
+        <div
+          className="text-zinc-600 text-sm py-4 text-center"
+          data-ocid="settings.members.empty_state"
+        >
+          No members yet.
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {members.map((member, idx) => {
+            const cls = getMemberClass(member);
+            const xut = getMemberXut(member);
+            return (
+              <div
+                key={member.id}
+                data-ocid={`settings.members.item.${idx + 1}`}
+                className="flex items-center gap-2 px-3 py-2 rounded bg-zinc-900/60 border border-zinc-800/50"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-zinc-200 font-medium truncate">
+                      {member.name}
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] border-zinc-700 text-zinc-500 shrink-0"
+                    >
+                      Class {cls}
+                    </Badge>
+                  </div>
+                  {xut && (
+                    <span className="text-xs font-mono text-zinc-600">
+                      {xut}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <button
+                    type="button"
+                    data-ocid={`settings.members.edit_button.${idx + 1}`}
+                    onClick={() => setEditMember(member)}
+                    className="w-7 h-7 flex items-center justify-center rounded hover:bg-zinc-800 text-zinc-600 hover:text-zinc-300 transition-colors"
+                    title="Edit member"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <button
+                        type="button"
+                        data-ocid={`settings.members.delete_button.${idx + 1}`}
+                        className="w-7 h-7 flex items-center justify-center rounded hover:bg-red-500/10 text-zinc-600 hover:text-red-400 transition-colors"
+                        title="Delete member"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent className="bg-[#111111] border-zinc-800 text-white">
+                      <AlertDialogHeader>
+                        <AlertDialogTitle className="text-zinc-100">
+                          Delete Member
+                        </AlertDialogTitle>
+                        <AlertDialogDescription className="text-zinc-500">
+                          Remove {member.name}? This cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel
+                          data-ocid="settings.members.cancel_button"
+                          className="border-zinc-700 text-zinc-300"
+                        >
+                          Cancel
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                          data-ocid="settings.members.confirm_button"
+                          onClick={() => handleDelete(member.id)}
+                          className="bg-red-600 text-white hover:bg-red-700"
+                        >
+                          Delete
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
@@ -850,8 +2291,8 @@ function PasswordManagementSection() {
             </div>
           </div>
           <p className="text-xs text-zinc-600">
-            These passwords allow access to the Xution platform. Default
-            passwords are "bacon" and "leviathan".
+            These passwords grant access to Xution. Default: "bacon" and
+            "leviathan".
           </p>
         </>
       )}
@@ -859,564 +2300,143 @@ function PasswordManagementSection() {
   );
 }
 
-// ── Broadcast Section ─────────────────────────────────────────────────────────
+// ── Settings Sheet ────────────────────────────────────────────────────────────
 
-function BroadcastSection() {
-  const { data: members } = useMembers();
-  const { currentMemberId } = useAuthContext();
-  const createBroadcast = useCreateBroadcast();
-
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
-  const [priority, setPriority] = useState<BroadcastPriority>(
-    BroadcastPriority.normal,
-  );
-
-  const authorId = currentMemberId ?? members?.[0]?.id ?? "";
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!title.trim() || !content.trim() || !authorId) return;
-    try {
-      await createBroadcast.mutateAsync({
-        id: crypto.randomUUID(),
-        title: title.trim(),
-        content: content.trim(),
-        authorId,
-        priority,
-      });
-      toast.success("Broadcast posted");
-      setTitle("");
-      setContent("");
-      setPriority(BroadcastPriority.normal);
-    } catch {
-      toast.error("Failed to post broadcast");
-    }
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <Radio className="w-4 h-4 text-primary" />
-        <span className="text-xs text-zinc-400 uppercase tracking-wider font-mono">
-          Post Broadcast
-        </span>
-      </div>
-      <form onSubmit={handleSubmit} className="space-y-3">
-        <div className="space-y-1.5">
-          <Label className="text-xs text-zinc-500 uppercase tracking-wider font-mono">
-            Title
-          </Label>
-          <Input
-            data-ocid="broadcast.title.input"
-            placeholder="Broadcast title..."
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            required
-            className="bg-zinc-900 border-zinc-700 text-zinc-200"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs text-zinc-500 uppercase tracking-wider font-mono">
-            Message
-          </Label>
-          <Textarea
-            data-ocid="broadcast.content.textarea"
-            placeholder="Broadcast message..."
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            rows={3}
-            required
-            className="bg-zinc-900 border-zinc-700 text-zinc-200"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs text-zinc-500 uppercase tracking-wider font-mono">
-            Priority
-          </Label>
-          <Select
-            value={priority}
-            onValueChange={(v) => setPriority(v as BroadcastPriority)}
-          >
-            <SelectTrigger
-              data-ocid="broadcast.priority.select"
-              className="bg-zinc-900 border-zinc-700 text-zinc-200"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={BroadcastPriority.normal}>Normal</SelectItem>
-              <SelectItem value={BroadcastPriority.high}>High</SelectItem>
-              <SelectItem value={BroadcastPriority.urgent}>Urgent</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <Button
-          data-ocid="broadcast.submit_button"
-          type="submit"
-          disabled={
-            createBroadcast.isPending ||
-            !title.trim() ||
-            !content.trim() ||
-            !authorId
-          }
-          className="w-full bg-primary text-black hover:bg-primary/90"
-        >
-          {createBroadcast.isPending ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <Radio className="mr-2 h-4 w-4" />
-          )}
-          Post Broadcast
-        </Button>
-      </form>
-    </div>
-  );
-}
-
-// ── Transaction Type Styles ───────────────────────────────────────────────────
-
-const txTypeStyles: Record<TransactionType, string> = {
-  [TransactionType.payment]: "bg-blue-500/15 text-blue-400 border-blue-500/30",
-  [TransactionType.refund]:
-    "bg-green-500/15 text-green-400 border-green-500/30",
-  [TransactionType.fee]:
-    "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
-  [TransactionType.donation]: "bg-primary/15 text-primary border-primary/30",
-};
-
-// ── Add Transaction Dialog (Class 6) ─────────────────────────────────────────
-
-function AddTransactionDialogInline({
-  open,
-  onOpenChange,
+function SettingsSheetContent({
+  isAdmin,
+  lockdownState,
+  contactEmail,
+  onContactEmailChange,
 }: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
+  isAdmin: boolean;
+  lockdownState: LockdownState | null;
+  contactEmail: string;
+  onContactEmailChange: (v: string) => void;
 }) {
-  const addTx = useAddTransaction();
-  const { data: members } = useMembers();
-  const { data: facilities } = useFacilities();
-  const [memberId, setMemberId] = useState("");
-  const [facilityId, setFacilityId] = useState<string>("none");
-  const [amount, setAmount] = useState("");
-  const [description, setDescription] = useState("");
-  const [type, setType] = useState<TransactionType>(TransactionType.payment);
+  const [activeTab, setActiveTab] = useState<
+    | "contact"
+    | "passwords"
+    | "members"
+    | "transactions"
+    | "funds"
+    | "lockdown"
+    | "broadcasts"
+  >("contact");
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!memberId || !amount || !description.trim()) return;
-    const amountCents = Math.round(Number.parseFloat(amount) * 100);
-    if (Number.isNaN(amountCents) || amountCents <= 0) {
-      toast.error("Invalid amount");
-      return;
-    }
-    try {
-      await addTx.mutateAsync({
-        id: crypto.randomUUID(),
-        memberId,
-        facilityId: facilityId === "none" ? null : facilityId,
-        amount: BigInt(amountCents),
-        description: description.trim(),
-        type,
-      });
-      toast.success("Transaction recorded");
-      onOpenChange(false);
-      setMemberId("");
-      setFacilityId("none");
-      setAmount("");
-      setDescription("");
-      setType(TransactionType.payment);
-    } catch {
-      toast.error("Failed to add transaction");
-    }
-  }
+  const tabs = [
+    { id: "contact" as const, label: "Contact", icon: Mail },
+    ...(isAdmin
+      ? [
+          { id: "passwords" as const, label: "Passwords", icon: Key },
+          { id: "members" as const, label: "Members", icon: UserCog },
+          { id: "transactions" as const, label: "Transactions", icon: Receipt },
+          { id: "funds" as const, label: "Funds", icon: DollarSign },
+          { id: "broadcasts" as const, label: "Broadcasts", icon: RadioIcon },
+          { id: "lockdown" as const, label: "Lockdown", icon: Lock },
+        ]
+      : []),
+  ];
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        data-ocid="class6tx.add.dialog"
-        className="sm:max-w-md bg-[#111111] border-zinc-800 text-white"
-      >
-        <DialogHeader>
-          <DialogTitle className="text-primary font-display tracking-widest uppercase text-sm">
-            Add Transaction
-          </DialogTitle>
-          <DialogDescription className="text-zinc-500 text-xs">
-            Record a new financial transaction for any member.
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4 pt-2">
-          <div className="space-y-1.5">
-            <Label className="text-xs text-zinc-400 uppercase tracking-wider">
-              Member
-            </Label>
-            <Select value={memberId} onValueChange={setMemberId} required>
-              <SelectTrigger
-                data-ocid="class6tx.member.select"
-                className="bg-zinc-900 border-zinc-700 text-zinc-200"
-              >
-                <SelectValue placeholder="Select member..." />
-              </SelectTrigger>
-              <SelectContent>
-                {members?.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs text-zinc-400 uppercase tracking-wider">
-              Facility{" "}
-              <span className="text-zinc-600 normal-case">(optional)</span>
-            </Label>
-            <Select value={facilityId} onValueChange={setFacilityId}>
-              <SelectTrigger
-                data-ocid="class6tx.facility.select"
-                className="bg-zinc-900 border-zinc-700 text-zinc-200"
-              >
-                <SelectValue placeholder="None" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                {facilities?.map((f) => (
-                  <SelectItem key={f.id} value={f.id}>
-                    {f.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label
-                htmlFor="inline-tx-amount"
-                className="text-xs text-zinc-400 uppercase tracking-wider"
-              >
-                Amount (USD)
-              </Label>
+    <div className="flex flex-col h-full">
+      {/* Tab row */}
+      <div className="border-b border-zinc-800 px-2 py-2 flex gap-1 flex-wrap">
+        {tabs.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            data-ocid={`settings.${id}.tab`}
+            onClick={() => setActiveTab(id)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
+              activeTab === id
+                ? "bg-primary/15 text-primary"
+                : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
+            }`}
+          >
+            <Icon className="w-3.5 h-3.5" />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <ScrollArea className="flex-1">
+        <div className="p-4 space-y-4">
+          {activeTab === "contact" && (
+            <div className="space-y-3">
+              <p className="text-xs text-zinc-500 uppercase tracking-wider font-mono">
+                Contact Command Email
+              </p>
               <Input
-                id="inline-tx-amount"
-                data-ocid="class6tx.amount.input"
-                type="number"
-                step="0.01"
-                min="0"
-                placeholder="0.00"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                required
+                data-ocid="settings.contact.input"
+                type="email"
+                value={contactEmail}
+                onChange={(e) => onContactEmailChange(e.target.value)}
+                placeholder="contact@example.com"
                 className="bg-zinc-900 border-zinc-700 text-zinc-200"
               />
+              <p className="text-xs text-zinc-600">
+                The "Contact Command" button will open an email to this address.
+              </p>
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-zinc-400 uppercase tracking-wider">
-                Type
-              </Label>
-              <Select
-                value={type}
-                onValueChange={(v) => setType(v as TransactionType)}
-              >
-                <SelectTrigger
-                  data-ocid="class6tx.type.select"
-                  className="bg-zinc-900 border-zinc-700 text-zinc-200"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={TransactionType.payment}>
-                    Payment
-                  </SelectItem>
-                  <SelectItem value={TransactionType.refund}>Refund</SelectItem>
-                  <SelectItem value={TransactionType.fee}>Fee</SelectItem>
-                  <SelectItem value={TransactionType.donation}>
-                    Donation
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label
-              htmlFor="inline-tx-desc"
-              className="text-xs text-zinc-400 uppercase tracking-wider"
-            >
-              Description
-            </Label>
-            <Input
-              id="inline-tx-desc"
-              data-ocid="class6tx.description.input"
-              placeholder="Monthly membership dues..."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              required
-              className="bg-zinc-900 border-zinc-700 text-zinc-200"
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => onOpenChange(false)}
-              data-ocid="class6tx.cancel_button"
-              className="border-zinc-700 hover:bg-zinc-800 text-zinc-300"
-            >
-              Cancel
-            </Button>
-            <Button
-              data-ocid="class6tx.submit_button"
-              type="submit"
-              size="sm"
-              disabled={
-                addTx.isPending || !memberId || !description.trim() || !amount
-              }
-              className="bg-primary text-black hover:bg-primary/90"
-            >
-              {addTx.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                "Record Transaction"
-              )}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── My Transactions Section ───────────────────────────────────────────────────
-
-function MyTransactionsSection() {
-  const { data: transactions, isLoading } = useTransactions();
-  const { currentMemberId } = useAuthContext();
-
-  const sorted = (() => {
-    if (!transactions) return [];
-    const list = currentMemberId
-      ? transactions.filter((tx) => tx.memberId === currentMemberId)
-      : [...transactions];
-    return list.sort((a, b) => Number(b.createdAt - a.createdAt));
-  })();
-
-  const showNote = !currentMemberId;
-
-  if (isLoading) {
-    return (
-      <div className="space-y-2" data-ocid="mytx.loading_state">
-        {[1, 2, 3].map((n) => (
-          <Skeleton key={n} className="w-full h-10 rounded bg-zinc-800" />
-        ))}
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      {showNote && (
-        <div className="flex items-start gap-2 rounded bg-zinc-800/60 border border-zinc-700/40 px-3 py-2">
-          <Receipt className="w-3.5 h-3.5 text-zinc-500 mt-0.5 shrink-0" />
-          <p className="text-xs text-zinc-500 leading-relaxed">
-            Showing all transactions — log in via QR ID card to see personal
-            transactions only.
-          </p>
+          )}
+          {activeTab === "passwords" && isAdmin && (
+            <PasswordManagementSection />
+          )}
+          {activeTab === "members" && isAdmin && <MemberManagementSection />}
+          {activeTab === "transactions" && isAdmin && (
+            <GlobalTransactionsSection />
+          )}
+          {activeTab === "funds" && isAdmin && <AddFundsSection />}
+          {activeTab === "broadcasts" && isAdmin && <BroadcastSection />}
+          {activeTab === "lockdown" && isAdmin && (
+            <LockdownSection lockdownState={lockdownState} />
+          )}
         </div>
-      )}
-
-      {sorted.length === 0 ? (
-        <div
-          className="flex flex-col items-center gap-2 py-6 text-zinc-600"
-          data-ocid="mytx.empty_state"
-        >
-          <Receipt className="w-8 h-8 opacity-40" />
-          <p className="text-sm">No transactions found.</p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto -mx-1">
-          <Table data-ocid="mytx.table">
-            <TableHeader>
-              <TableRow className="border-zinc-800 hover:bg-transparent">
-                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
-                  Date
-                </TableHead>
-                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
-                  Description
-                </TableHead>
-                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
-                  Type
-                </TableHead>
-                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider text-right">
-                  Amount
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sorted.map((tx, idx) => (
-                <TableRow
-                  key={tx.id}
-                  data-ocid={`mytx.item.${idx + 1}`}
-                  className="border-zinc-800/60 hover:bg-zinc-800/30 transition-colors"
-                >
-                  <TableCell className="text-zinc-400 text-xs whitespace-nowrap">
-                    {formatDate(tx.createdAt)}
-                  </TableCell>
-                  <TableCell className="text-zinc-300 text-sm max-w-[160px] truncate">
-                    {tx.description}
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant="outline"
-                      className={`text-[10px] capitalize ${txTypeStyles[tx.type]}`}
-                    >
-                      {tx.type}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-sm font-medium text-zinc-200">
-                    {formatAmount(tx.amount)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+      </ScrollArea>
     </div>
   );
 }
 
-// ── Class 6 Transactions Section ──────────────────────────────────────────────
-
-function Class6TransactionsSection() {
-  const { data: transactions, isLoading } = useTransactions();
-  const { data: members } = useMembers();
-  const { data: facilities } = useFacilities();
-  const [addOpen, setAddOpen] = useState(false);
-
-  const memberMap = Object.fromEntries(
-    members?.map((m) => [m.id, m.name]) ?? [],
-  );
-  const facilityMap = Object.fromEntries(
-    facilities?.map((f) => [f.id, f.name]) ?? [],
-  );
-
-  const sorted = transactions
-    ? [...transactions].sort((a, b) => Number(b.createdAt - a.createdAt))
-    : [];
-
-  if (isLoading) {
-    return (
-      <div className="space-y-2" data-ocid="class6tx.loading_state">
-        {[1, 2, 3, 4].map((n) => (
-          <Skeleton key={n} className="w-full h-10 rounded bg-zinc-800" />
-        ))}
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-zinc-500">
-          {sorted.length} transaction{sorted.length !== 1 ? "s" : ""} total
-        </p>
-        <Button
-          data-ocid="class6tx.add_button"
-          size="sm"
-          onClick={() => setAddOpen(true)}
-          className="bg-primary text-black hover:bg-primary/90 h-7 text-xs gap-1.5"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          Add Transaction
-        </Button>
-      </div>
-
-      <AddTransactionDialogInline open={addOpen} onOpenChange={setAddOpen} />
-
-      {sorted.length === 0 ? (
-        <div
-          className="flex flex-col items-center gap-2 py-6 text-zinc-600"
-          data-ocid="class6tx.empty_state"
-        >
-          <Receipt className="w-8 h-8 opacity-40" />
-          <p className="text-sm">No transactions recorded yet.</p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto -mx-1">
-          <Table data-ocid="class6tx.table">
-            <TableHeader>
-              <TableRow className="border-zinc-800 hover:bg-transparent">
-                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
-                  Member
-                </TableHead>
-                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
-                  Facility
-                </TableHead>
-                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
-                  Description
-                </TableHead>
-                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
-                  Type
-                </TableHead>
-                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider text-right">
-                  Amount
-                </TableHead>
-                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
-                  Date
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sorted.map((tx, idx) => (
-                <TableRow
-                  key={tx.id}
-                  data-ocid={`class6tx.item.${idx + 1}`}
-                  className="border-zinc-800/60 hover:bg-zinc-800/30 transition-colors"
-                >
-                  <TableCell className="font-medium text-zinc-200 text-sm">
-                    {memberMap[tx.memberId] ?? tx.memberId}
-                  </TableCell>
-                  <TableCell className="text-zinc-500 text-sm">
-                    {tx.facilityId
-                      ? (facilityMap[tx.facilityId] ?? tx.facilityId)
-                      : "—"}
-                  </TableCell>
-                  <TableCell className="text-zinc-300 text-sm max-w-[140px] truncate">
-                    {tx.description}
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant="outline"
-                      className={`text-[10px] capitalize ${txTypeStyles[tx.type]}`}
-                    >
-                      {tx.type}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-sm font-medium text-zinc-200">
-                    {formatAmount(tx.amount)}
-                  </TableCell>
-                  <TableCell className="text-zinc-500 text-xs whitespace-nowrap">
-                    {formatDate(tx.createdAt)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Main App ─────────────────────────────────────────────────────────────────
+// ── Main App Content ──────────────────────────────────────────────────────────
 
 function AppContent() {
-  const { isAuthenticated, isRestoring, logout } = useAuthContext();
+  const { isAuthenticated, isRestoring, logout, currentMemberId } =
+    useAuthContext();
   const { data: isAdmin } = useIsAdmin();
+  const { data: broadcasts } = useBroadcasts();
+  const { data: members } = useMembers();
+  const { selectedOfficeId } = useSelectedOffice();
 
   const [dmSheetOpen, setDmSheetOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [contactEmail, setContactEmail] = useState("Gameloverv@gmail.com");
+
+  // Determine viewer's class level
+  const viewerClass = (() => {
+    if (isAdmin) return 6;
+    if (currentMemberId && members) {
+      const member = members.find((m) => m.id === currentMemberId);
+      if (member) return getMemberClass(member);
+    }
+    return 1;
+  })();
+
+  // Lockdown detection
+  const lockdownBroadcast = broadcasts?.find((b) => b.title === "__LOCKDOWN__");
+  const lockdownState = lockdownBroadcast
+    ? (() => {
+        try {
+          return JSON.parse(lockdownBroadcast.content) as LockdownState;
+        } catch {
+          return null;
+        }
+      })()
+    : null;
+  const isLockedDown =
+    !isAdmin &&
+    lockdownState?.active === true &&
+    (lockdownState.officeIds.length === 0 ||
+      lockdownState.officeIds.includes(selectedOfficeId ?? ""));
 
   if (isRestoring) {
     return (
@@ -1445,18 +2465,24 @@ function AppContent() {
 
   return (
     <>
-      {/* Root: pure black, full height */}
       <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col pb-[72px]">
-        {/* ── Fixed top header ────────────────────────────────────── */}
+        {/* Fixed top header */}
         <header className="sticky top-0 z-20 bg-[#0a0a0a]/95 backdrop-blur-sm border-b border-zinc-900 flex items-center justify-between px-4 py-3">
-          {/* Brand */}
           <div className="flex items-center gap-2.5">
             <span className="font-bold text-2xl tracking-[0.2em] uppercase text-primary font-display">
               XUTION
             </span>
             <span className="w-2.5 h-2.5 rounded-full bg-green-500 shrink-0 shadow-[0_0_6px_rgba(34,197,94,0.7)]" />
+            {isLockedDown && (
+              <Badge
+                variant="outline"
+                className="text-[10px] border-red-500/50 text-red-400 gap-1"
+              >
+                <Lock className="w-2.5 h-2.5" />
+                LOCKDOWN
+              </Badge>
+            )}
           </div>
-          {/* Logout */}
           <Button
             data-ocid="header.logout_button"
             variant="outline"
@@ -1469,9 +2495,19 @@ function AppContent() {
           </Button>
         </header>
 
-        {/* ── Scrollable accordion main ───────────────────────────── */}
+        {/* Lockdown banner */}
+        {isLockedDown && lockdownState && (
+          <div className="bg-red-900/20 border-b border-red-500/30 px-4 py-2.5 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+            <p className="text-sm text-red-300 flex-1">
+              <span className="font-bold">LOCKDOWN:</span>{" "}
+              {lockdownState.message}
+            </p>
+          </div>
+        )}
+
+        {/* Scrollable accordion main */}
         <main className="flex-1 overflow-y-auto px-3 py-2 space-y-1.5">
-          {/* Activity Feed */}
           <AccordionSection
             title="Activity Feed (Last 24h)"
             titleColor="green"
@@ -1481,60 +2517,54 @@ function AppContent() {
             <ActivityFeed />
           </AccordionSection>
 
-          {/* Office Selector */}
           <AccordionSection
             title="Office Selector"
             titleColor="gray"
             ocid="accordion.office_selector.toggle"
           >
-            <OfficeSelector />
+            <OfficeSelector isAdmin={isAdmin ?? false} />
           </AccordionSection>
 
-          {/* Members & Favourites */}
           <AccordionSection
             title="Members & Favourites"
             ocid="accordion.members.toggle"
           >
-            <div className="-mx-4 -mb-4">
-              <MembersPage />
-            </div>
+            <MembersPage viewerClass={viewerClass} />
           </AccordionSection>
 
-          {/* Facilities */}
           <AccordionSection
             title="Facilities"
             ocid="accordion.facilities.toggle"
           >
-            <div className="-mx-4 -mb-4">
-              <FacilitiesPage />
-            </div>
+            <FacilitiesPage
+              isAdmin={isAdmin ?? false}
+              viewerClass={viewerClass}
+              isLockedDown={isLockedDown}
+              currentMemberId={currentMemberId}
+            />
           </AccordionSection>
 
-          {/* My Transactions — visible to all logged-in users */}
           <AccordionSection
             title="My Transactions"
             ocid="accordion.mytx.toggle"
           >
-            <MyTransactionsSection />
+            <MyTransactionsSection currentMemberId={currentMemberId} />
           </AccordionSection>
 
-          {/* Class 6 Transactions — admins only */}
           {isAdmin && (
             <AccordionSection
-              title="Class 6 Transactions"
+              title="Global Transactions"
               titleColor="green"
-              ocid="accordion.class6tx.toggle"
+              ocid="accordion.globaltx.toggle"
             >
-              <Class6TransactionsSection />
+              <GlobalTransactionsSection />
             </AccordionSection>
           )}
 
-          {/* About Xution */}
           <AccordionSection title="About Xution" ocid="accordion.about.toggle">
             <AboutSection isAdmin={isAdmin ?? false} />
           </AccordionSection>
 
-          {/* Features & Credits */}
           <AccordionSection
             title="Features & Credits"
             ocid="accordion.features.toggle"
@@ -1542,18 +2572,14 @@ function AppContent() {
             <FeaturesSection isAdmin={isAdmin ?? false} />
           </AccordionSection>
 
-          {/* Policies */}
           <AccordionSection title="Policies" ocid="accordion.policies.toggle">
-            <div className="-mx-4 -mb-4">
-              <PoliciesPage />
-            </div>
+            <PoliciesPage isAdmin={isAdmin ?? false} />
           </AccordionSection>
         </main>
       </div>
 
-      {/* ── Fixed bottom bar ────────────────────────────────────── */}
+      {/* Fixed bottom bar */}
       <footer className="fixed bottom-0 left-0 right-0 z-20 bg-[#0a0a0a]/95 backdrop-blur-sm border-t border-zinc-900 px-4 py-2.5 flex items-center gap-2">
-        {/* Copyright */}
         <div className="flex-1 min-w-0">
           <p className="text-[10px] text-zinc-600 truncate">
             © {new Date().getFullYear()}.{" "}
@@ -1568,7 +2594,6 @@ function AppContent() {
           </p>
         </div>
 
-        {/* Icon buttons */}
         <button
           data-ocid="bottombar.dm_button"
           type="button"
@@ -1589,18 +2614,17 @@ function AppContent() {
           <Settings className="w-4 h-4 text-zinc-400" />
         </button>
 
-        {/* Contact Command pill */}
         <Button
           data-ocid="bottombar.contact_command_button"
           className="bg-primary text-black hover:bg-primary/90 h-9 px-4 rounded-full font-bold text-xs tracking-wide gap-1.5 shrink-0 shadow-[0_0_16px_oklch(0.78_0.17_75/0.3)]"
-          onClick={() => window.open("mailto:Gameloverv@gmail.com", "_blank")}
+          onClick={() => window.open(`mailto:${contactEmail}`, "_blank")}
         >
           <Mail className="w-3.5 h-3.5" />
           Contact Command
         </Button>
       </footer>
 
-      {/* ── DM Sheet ───────────────────────────────────────────── */}
+      {/* DM Sheet */}
       <Sheet open={dmSheetOpen} onOpenChange={setDmSheetOpen}>
         <SheetContent
           data-ocid="messages.sheet"
@@ -1620,37 +2644,29 @@ function AppContent() {
         </SheetContent>
       </Sheet>
 
-      {/* ── Settings Dialog ────────────────────────────────────── */}
-      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <DialogContent
-          data-ocid="settings.dialog"
-          className="bg-[#111111] border-zinc-800 text-white max-w-md max-h-[90vh] overflow-y-auto"
+      {/* Settings Sheet */}
+      <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <SheetContent
+          data-ocid="settings.sheet"
+          side="right"
+          className="w-full sm:w-[500px] sm:max-w-[500px] bg-[#0d0d0d] border-zinc-800 p-0 flex flex-col"
         >
-          <DialogHeader>
-            <DialogTitle className="text-primary font-display tracking-widest uppercase text-sm flex items-center gap-2">
-              <Key className="w-4 h-4" />
-              Admin Settings
-            </DialogTitle>
-          </DialogHeader>
-
-          {isAdmin ? (
-            <div className="space-y-6">
-              <PasswordManagementSection />
-              <div className="border-t border-zinc-800 pt-4">
-                <BroadcastSection />
-              </div>
-            </div>
-          ) : (
-            <div className="py-6 text-center space-y-2">
-              <Settings className="w-8 h-8 text-zinc-600 mx-auto" />
-              <p className="text-zinc-400 text-sm">Admin access required</p>
-              <p className="text-zinc-600 text-xs">
-                Only Class 6 administrators can manage settings.
-              </p>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+          <SheetHeader className="px-5 py-4 border-b border-zinc-800 shrink-0">
+            <SheetTitle className="text-primary font-display tracking-widest uppercase text-sm flex items-center gap-2">
+              <Settings className="w-4 h-4" />
+              Settings
+            </SheetTitle>
+          </SheetHeader>
+          <div className="flex-1 overflow-hidden">
+            <SettingsSheetContent
+              isAdmin={isAdmin ?? false}
+              lockdownState={lockdownState}
+              contactEmail={contactEmail}
+              onContactEmailChange={setContactEmail}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <Toaster />
     </>
