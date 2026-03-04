@@ -1,0 +1,210 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Fonts ─────────────────────────────────────────────────── */
+@font-face {
+  font-family: "Bricolage Grotesque";
+  src: url("/assets/fonts/BricolageGrotesque[opsz,wdth,wght].woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/assets/fonts/GeistMono[wght].woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Cabinet Grotesk";
+  src: url("/assets/fonts/CabinetGrotesk[wght].woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@layer base {
+  :root {
+    --radius: 0.5rem;
+
+    /* Core palette: Deep industrial dark with amber accent */
+    --background: 0.14 0.008 265;
+    --foreground: 0.93 0.01 250;
+
+    --card: 0.18 0.01 265;
+    --card-foreground: 0.93 0.01 250;
+
+    --popover: 0.19 0.012 265;
+    --popover-foreground: 0.93 0.01 250;
+
+    /* Amber primary */
+    --primary: 0.78 0.17 75;
+    --primary-foreground: 0.12 0.01 265;
+
+    --secondary: 0.22 0.015 265;
+    --secondary-foreground: 0.85 0.01 250;
+
+    --muted: 0.22 0.012 265;
+    --muted-foreground: 0.55 0.015 255;
+
+    --accent: 0.25 0.02 265;
+    --accent-foreground: 0.92 0.01 250;
+
+    --destructive: 0.6 0.22 27;
+    --destructive-foreground: 0.98 0 0;
+
+    --border: 0.28 0.015 265;
+    --input: 0.25 0.015 265;
+    --ring: 0.78 0.17 75;
+
+    /* Charts */
+    --chart-1: 0.78 0.17 75;
+    --chart-2: 0.6 0.18 200;
+    --chart-3: 0.65 0.15 145;
+    --chart-4: 0.72 0.19 300;
+    --chart-5: 0.7 0.2 30;
+
+    /* Sidebar */
+    --sidebar: 0.11 0.01 265;
+    --sidebar-foreground: 0.88 0.01 250;
+    --sidebar-primary: 0.78 0.17 75;
+    --sidebar-primary-foreground: 0.12 0.01 265;
+    --sidebar-accent: 0.19 0.015 265;
+    --sidebar-accent-foreground: 0.88 0.01 250;
+    --sidebar-border: 0.22 0.015 265;
+    --sidebar-ring: 0.78 0.17 75;
+
+    /* Custom tokens */
+    --success: 0.65 0.18 145;
+    --success-foreground: 0.12 0.01 265;
+    --warning: 0.75 0.2 55;
+    --warning-foreground: 0.12 0.01 265;
+    --info: 0.6 0.18 220;
+    --info-foreground: 0.98 0 0;
+
+    /* Login page tokens */
+    --login-bg: 0.07 0.005 265;
+    --amber-primary: 0.78 0.17 75;
+    --amber-muted: 0.55 0.07 75;
+    --amber-border: 0.45 0.12 75;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/40;
+  }
+}
+
+@layer utilities {
+  /* Login page styles */
+  .login-card {
+    background: oklch(0.1 0.006 265);
+    border: 1px dashed oklch(0.45 0.12 75 / 0.6);
+    box-shadow:
+      0 0 40px oklch(0.78 0.17 75 / 0.05),
+      inset 0 1px 0 oklch(0.45 0.12 75 / 0.15);
+  }
+
+  .login-input {
+    background: oklch(0.08 0.005 265);
+    border-color: oklch(0.35 0.08 75 / 0.5);
+    color: oklch(0.88 0.08 75);
+    font-family: "Geist Mono", monospace;
+  }
+
+  .login-input::placeholder {
+    color: oklch(0.4 0.04 75);
+  }
+
+  .login-input:focus {
+    border-color: oklch(0.78 0.17 75 / 0.7);
+    box-shadow: 0 0 0 2px oklch(0.78 0.17 75 / 0.15);
+  }
+
+  .login-cta {
+    background: oklch(0.78 0.17 75);
+    color: oklch(0.08 0.005 265);
+    box-shadow: 0 0 20px oklch(0.78 0.17 75 / 0.25);
+    transition: all 0.2s ease;
+  }
+
+  .login-cta:hover:not(:disabled) {
+    background: oklch(0.82 0.18 75);
+    box-shadow: 0 0 30px oklch(0.78 0.17 75 / 0.4);
+  }
+
+  .login-cta:disabled {
+    opacity: 0.5;
+  }
+
+  .text-amber-primary {
+    color: oklch(0.78 0.17 75);
+  }
+
+  .text-amber-muted {
+    color: oklch(0.55 0.07 75);
+  }
+
+  .border-amber-border {
+    border-color: oklch(0.45 0.12 75);
+  }
+
+  .bg-login-bg {
+    background-color: oklch(0.07 0.005 265);
+  }
+
+  .text-gradient-amber {
+    background: linear-gradient(135deg, oklch(0.78 0.17 75), oklch(0.7 0.2 55));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .glass {
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    background: oklch(0.18 0.01 265 / 0.85);
+    border: 1px solid oklch(0.28 0.015 265 / 0.5);
+  }
+
+  .surface-elevated {
+    background: oklch(0.21 0.013 265);
+    box-shadow: 0 1px 3px oklch(0 0 0 / 0.4), 0 4px 12px oklch(0 0 0 / 0.2);
+  }
+
+  .amber-glow {
+    box-shadow: 0 0 20px oklch(0.78 0.17 75 / 0.15);
+  }
+
+  .sidebar-item-active {
+    background: oklch(0.78 0.17 75 / 0.12);
+    color: oklch(0.78 0.17 75);
+    border-left: 2px solid oklch(0.78 0.17 75);
+  }
+}
