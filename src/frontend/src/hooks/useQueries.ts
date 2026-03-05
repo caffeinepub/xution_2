@@ -277,7 +277,20 @@ export function useDeactivatePolicy() {
   return useMutation({
     mutationFn: async (id: string) => {
       if (!actor) throw new Error("No actor");
-      return actor.deactivatePolicy(id);
+      // Hard delete — backend supports deletePolicy
+      return actor.deletePolicy(id);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["policies"] }),
+  });
+}
+
+export function useDeletePolicy() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      if (!actor) throw new Error("No actor");
+      return actor.deletePolicy(id);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["policies"] }),
   });
@@ -376,6 +389,32 @@ export function useVerifyPassword() {
       if (!actor) throw new Error("No actor");
       return actor.verifyPassword(password);
     },
+  });
+}
+
+// ── Contact Email ─────────────────────────────────────────────────────────────
+
+export function useGetContactEmail() {
+  const { actor, isFetching } = useActor();
+  return useQuery<string>({
+    queryKey: ["contactEmail"],
+    queryFn: async () => {
+      if (!actor) return "Gameloverv@gmail.com";
+      return actor.getContactEmail();
+    },
+    enabled: !!actor && !isFetching,
+  });
+}
+
+export function useSetContactEmail() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (email: string) => {
+      if (!actor) throw new Error("No actor");
+      return actor.setContactEmail(email);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["contactEmail"] }),
   });
 }
 

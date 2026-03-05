@@ -15,6 +15,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useActor } from "../hooks/useActor";
 import { useAuthContext } from "../hooks/useAuthContext";
+import { getMemberClass } from "../utils/memberClass";
 
 type LoginStatus =
   | { state: "idle" }
@@ -40,13 +41,21 @@ export function LoginPage() {
   // Pending QR text that arrived before the actor was ready
   const [pendingQrText, setPendingQrText] = useState<string | null>(null);
 
+  // Pending password that arrived before the actor was ready
+  const [pendingPassword, setPendingPassword] = useState<string | null>(null);
+
   const isLoadingAny =
     pwStatus.state === "loading" || qrStatus.state === "loading";
 
   // ── Password login ──────────────────────────────────────────────────────────
-  async function handlePasswordLogin(e: React.FormEvent) {
-    e.preventDefault();
-    if (!password.trim() || !actor) return;
+  async function doPasswordLogin() {
+    if (!password.trim()) return;
+    if (!actor) {
+      setPwStatus({ state: "loading" });
+      // Actor not ready — will be retried via the effect below
+      setPendingPassword(password);
+      return;
+    }
     setPwStatus({ state: "loading" });
     const ok = await loginWithPassword(password);
     if (!ok) {
@@ -57,6 +66,11 @@ export function LoginPage() {
     } else {
       setPwStatus({ state: "success" });
     }
+  }
+
+  async function handlePasswordLogin(e: React.FormEvent) {
+    e.preventDefault();
+    await doPasswordLogin();
   }
 
   // ── QR decode ───────────────────────────────────────────────────────────────
@@ -125,7 +139,8 @@ export function LoginPage() {
           return;
         }
 
-        const isAdminMember = member.role === "admin";
+        // Class 6 QR login grants admin access
+        const isAdminMember = getMemberClass(member) >= 6;
         await loginWithQr(member.id, isAdminMember);
         setQrStatus({ state: "success" });
       } catch {
@@ -152,7 +167,8 @@ export function LoginPage() {
             message: `QR ID "${pendingQrText}" is not registered in this system.`,
           });
         } else {
-          const isAdminMember = member.role === "admin";
+          // Class 6 QR login grants admin access
+          const isAdminMember = getMemberClass(member) >= 6;
           await loginWithQr(member.id, isAdminMember);
           setQrStatus({ state: "success" });
         }
@@ -170,6 +186,37 @@ export function LoginPage() {
       cancelled = true;
     };
   }, [actor, pendingQrText, loginWithQr]);
+
+  // When actor becomes available and we have a pending password login, retry it
+  useEffect(() => {
+    if (!actor || !pendingPassword) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const ok = await loginWithPassword(pendingPassword);
+        if (cancelled) return;
+        if (!ok) {
+          setPwStatus({
+            state: "error",
+            message: "Incorrect password. Try again.",
+          });
+        } else {
+          setPwStatus({ state: "success" });
+        }
+      } catch {
+        if (!cancelled)
+          setPwStatus({
+            state: "error",
+            message: "Incorrect password. Try again.",
+          });
+      } finally {
+        if (!cancelled) setPendingPassword(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [actor, pendingPassword, loginWithPassword]);
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -424,14 +471,14 @@ export function LoginPage() {
           <Button
             data-ocid="login.primary_button"
             type="button"
-            onClick={handlePasswordLogin}
+            onClick={doPasswordLogin}
             disabled={isLoadingAny || !password.trim()}
             className="w-full h-11 login-cta font-mono font-bold tracking-[0.15em] uppercase text-sm"
           >
             {pwStatus.state === "loading" ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                VERIFYING...
+                {pendingPassword ? "CONNECTING..." : "VERIFYING..."}
               </>
             ) : (
               <>

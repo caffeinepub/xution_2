@@ -108,6 +108,7 @@ export interface backendInterface {
     createSession(token: string, sessionType: string, memberId: string | null): Promise<void>;
     deactivatePolicy(id: string): Promise<void>;
     deleteMember(id: string): Promise<void>;
+    deletePolicy(id: string): Promise<void>;
     destroySession(token: string): Promise<void>;
     getAboutText(): Promise<string>;
     getAllBroadcasts(): Promise<Array<Broadcast>>;
@@ -119,6 +120,7 @@ export interface backendInterface {
     getBroadcast(id: string): Promise<Broadcast>;
     getCallerUserProfile(): Promise<UserProfile | null>;
     getCallerUserRole(): Promise<UserRole>;
+    getContactEmail(): Promise<string>;
     getDM(id: string): Promise<DM>;
     getFacility(id: string): Promise<Facility>;
     getFeaturesList(): Promise<Array<string>>;
@@ -129,10 +131,13 @@ export interface backendInterface {
     getTransaction(id: string): Promise<Transaction>;
     getUserProfile(user: Principal): Promise<UserProfile | null>;
     isCallerAdmin(): Promise<boolean>;
+    loadTmpFS(): Promise<Uint8Array>;
     markDMAsRead(id: string): Promise<void>;
     removeFacility(id: string): Promise<void>;
     saveCallerUserProfile(profile: UserProfile): Promise<void>;
+    saveTmpFS(fs: Uint8Array): Promise<void>;
     sendDM(fromMemberId: string, toMemberId: string, content: string): Promise<void>;
+    setContactEmail(email: string): Promise<void>;
     setMemberIdCard(memberId: string, imageDataUrl: string): Promise<void>;
     setPasswords(p1: string, p2: string): Promise<void>;
     updateAboutText(newText: string): Promise<void>;

@@ -76,7 +76,7 @@ import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { BroadcastPriority, Role, TransactionType } from "./backend.d";
 import type { Member } from "./backend.d";
-import { useAuthContext } from "./hooks/useAuthContext";
+import { AuthContextProvider, useAuthContext } from "./hooks/useAuthContext";
 import { useInternetIdentity } from "./hooks/useInternetIdentity";
 import {
   useAboutText,
@@ -88,11 +88,13 @@ import {
   useDeleteMember,
   useFacilities,
   useFeaturesList,
+  useGetContactEmail,
   useGetPasswords,
   useIsAdmin,
   useMembers,
   usePolicies,
   useRemoveFacility,
+  useSetContactEmail,
   useSetMemberIdCard,
   useSetPasswords,
   useTransactions,
@@ -1713,6 +1715,7 @@ function AddFundsSection() {
   const [memberId, setMemberId] = useState("");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
+  const [mode, setMode] = useState<"add" | "remove">("add");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -1722,21 +1725,25 @@ function AddFundsSection() {
       toast.error("Invalid amount");
       return;
     }
+    const isRemove = mode === "remove";
+    const defaultNote = isRemove
+      ? "Funds removed by admin"
+      : "Funds added by admin";
     try {
       await addTx.mutateAsync({
         id: crypto.randomUUID(),
         memberId,
         facilityId: null,
         amount: BigInt(amountCents),
-        description: `[Other] ${description.trim() || "Funds added by admin"}`,
-        type: TransactionType.donation,
+        description: `[Other] ${description.trim() || defaultNote}`,
+        type: isRemove ? TransactionType.payment : TransactionType.donation,
       });
-      toast.success("Funds added");
+      toast.success(isRemove ? "Funds removed" : "Funds added");
       setMemberId("");
       setAmount("");
       setDescription("");
     } catch {
-      toast.error("Failed to add funds");
+      toast.error(isRemove ? "Failed to remove funds" : "Failed to add funds");
     }
   }
 
@@ -1745,8 +1752,35 @@ function AddFundsSection() {
       <div className="flex items-center gap-2">
         <DollarSign className="w-4 h-4 text-green-400" />
         <span className="text-xs text-zinc-400 uppercase tracking-wider font-mono">
-          Add / Remove Funds
+          Manage Funds
         </span>
+      </div>
+      {/* Mode toggle */}
+      <div className="flex gap-1 bg-zinc-900 rounded p-1">
+        <button
+          type="button"
+          data-ocid="funds.add.toggle"
+          onClick={() => setMode("add")}
+          className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors ${
+            mode === "add"
+              ? "bg-green-700 text-white"
+              : "text-zinc-500 hover:text-zinc-300"
+          }`}
+        >
+          Add Funds
+        </button>
+        <button
+          type="button"
+          data-ocid="funds.remove.toggle"
+          onClick={() => setMode("remove")}
+          className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors ${
+            mode === "remove"
+              ? "bg-red-700 text-white"
+              : "text-zinc-500 hover:text-zinc-300"
+          }`}
+        >
+          Remove Funds
+        </button>
       </div>
       <form onSubmit={handleSubmit} className="space-y-3">
         <div className="space-y-1.5">
@@ -1801,14 +1835,18 @@ function AddFundsSection() {
           data-ocid="funds.submit_button"
           type="submit"
           disabled={addTx.isPending || !memberId || !amount}
-          className="w-full bg-green-700 hover:bg-green-600 text-white"
+          className={`w-full text-white ${
+            mode === "remove"
+              ? "bg-red-700 hover:bg-red-600"
+              : "bg-green-700 hover:bg-green-600"
+          }`}
         >
           {addTx.isPending ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           ) : (
             <DollarSign className="mr-2 h-4 w-4" />
           )}
-          Add Funds
+          {mode === "remove" ? "Remove Funds" : "Add Funds"}
         </Button>
       </form>
     </div>
@@ -2055,15 +2093,26 @@ function MemberManagementSection() {
   const deleteMember = useDeleteMember();
   const [addOpen, setAddOpen] = useState(false);
   const [editMember, setEditMember] = useState<Member | undefined>();
+  const [search, setSearch] = useState("");
 
-  async function handleDelete(id: string) {
+  const PROTECTED_NAMES = ["unity", "syndelious"];
+
+  async function handleDelete(member: Member) {
+    if (PROTECTED_NAMES.includes(member.name.toLowerCase())) {
+      toast.error(`${member.name} cannot be deleted`);
+      return;
+    }
     try {
-      await deleteMember.mutateAsync(id);
+      await deleteMember.mutateAsync(member.id);
       toast.success("Member deleted");
     } catch {
       toast.error("Failed to delete member");
     }
   }
+
+  const filtered = (members ?? []).filter((m) =>
+    search.trim() ? m.name.toLowerCase().includes(search.toLowerCase()) : true,
+  );
 
   return (
     <div className="space-y-3">
@@ -2077,6 +2126,18 @@ function MemberManagementSection() {
         <Plus className="w-3.5 h-3.5" />
         Add Member
       </Button>
+
+      {/* Search */}
+      <div className="relative">
+        <X className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600 pointer-events-none" />
+        <input
+          data-ocid="settings.members.search_input"
+          placeholder="Search members..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full h-8 pl-8 pr-3 rounded bg-zinc-900 border border-zinc-700 text-zinc-200 text-sm"
+        />
+      </div>
 
       <MemberFormDialog open={addOpen} onOpenChange={setAddOpen} />
       {editMember && (
@@ -2104,9 +2165,12 @@ function MemberManagementSection() {
         </div>
       ) : (
         <div className="space-y-1.5">
-          {members.map((member, idx) => {
+          {filtered.map((member, idx) => {
             const cls = getMemberClass(member);
             const xut = getMemberXut(member);
+            const isProtected = PROTECTED_NAMES.includes(
+              member.name.toLowerCase(),
+            );
             return (
               <div
                 key={member.id}
@@ -2124,6 +2188,14 @@ function MemberManagementSection() {
                     >
                       Class {cls}
                     </Badge>
+                    {isProtected && (
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] border-primary/40 text-primary shrink-0"
+                      >
+                        Protected
+                      </Badge>
+                    )}
                   </div>
                   {xut && (
                     <span className="text-xs font-mono text-zinc-600">
@@ -2141,43 +2213,47 @@ function MemberManagementSection() {
                   >
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <button
-                        type="button"
-                        data-ocid={`settings.members.delete_button.${idx + 1}`}
-                        className="w-7 h-7 flex items-center justify-center rounded hover:bg-red-500/10 text-zinc-600 hover:text-red-400 transition-colors"
-                        title="Delete member"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent className="bg-[#111111] border-zinc-800 text-white">
-                      <AlertDialogHeader>
-                        <AlertDialogTitle className="text-zinc-100">
-                          Delete Member
-                        </AlertDialogTitle>
-                        <AlertDialogDescription className="text-zinc-500">
-                          Remove {member.name}? This cannot be undone.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel
-                          data-ocid="settings.members.cancel_button"
-                          className="border-zinc-700 text-zinc-300"
+                  {!isProtected ? (
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <button
+                          type="button"
+                          data-ocid={`settings.members.delete_button.${idx + 1}`}
+                          className="w-7 h-7 flex items-center justify-center rounded hover:bg-red-500/10 text-zinc-600 hover:text-red-400 transition-colors"
+                          title="Delete member"
                         >
-                          Cancel
-                        </AlertDialogCancel>
-                        <AlertDialogAction
-                          data-ocid="settings.members.confirm_button"
-                          onClick={() => handleDelete(member.id)}
-                          className="bg-red-600 text-white hover:bg-red-700"
-                        >
-                          Delete
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent className="bg-[#111111] border-zinc-800 text-white">
+                        <AlertDialogHeader>
+                          <AlertDialogTitle className="text-zinc-100">
+                            Delete Member
+                          </AlertDialogTitle>
+                          <AlertDialogDescription className="text-zinc-500">
+                            Remove {member.name}? This cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel
+                            data-ocid="settings.members.cancel_button"
+                            className="border-zinc-700 text-zinc-300"
+                          >
+                            Cancel
+                          </AlertDialogCancel>
+                          <AlertDialogAction
+                            data-ocid="settings.members.confirm_button"
+                            onClick={() => handleDelete(member)}
+                            className="bg-red-600 text-white hover:bg-red-700"
+                          >
+                            Delete
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  ) : (
+                    <div className="w-7 h-7" />
+                  )}
                 </div>
               </div>
             );
@@ -2302,16 +2378,111 @@ function PasswordManagementSection() {
 
 // ── Settings Sheet ────────────────────────────────────────────────────────────
 
+function ContactEmailSection({ isAdmin }: { isAdmin: boolean }) {
+  const { data: chainEmail, isLoading } = useGetContactEmail();
+  const setContactEmailMutation = useSetContactEmail();
+  const [draft, setDraft] = useState("");
+  const [editing, setEditing] = useState(false);
+
+  const currentEmail = chainEmail ?? "Gameloverv@gmail.com";
+
+  async function handleSave() {
+    if (!draft.trim()) return;
+    try {
+      await setContactEmailMutation.mutateAsync(draft.trim());
+      toast.success("Contact email updated");
+      setEditing(false);
+      setDraft("");
+    } catch {
+      toast.error("Failed to update contact email");
+    }
+  }
+
+  if (isLoading) {
+    return <Skeleton className="w-full h-10 bg-zinc-800" />;
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-zinc-500 uppercase tracking-wider font-mono">
+        Contact Command Email
+      </p>
+      {isAdmin ? (
+        <>
+          {editing ? (
+            <div className="space-y-2">
+              <Input
+                data-ocid="settings.contact.input"
+                type="email"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder={currentEmail}
+                className="bg-zinc-900 border-zinc-700 text-zinc-200"
+              />
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  className="bg-primary text-black hover:bg-primary/90 h-7 text-xs"
+                  onClick={handleSave}
+                  disabled={setContactEmailMutation.isPending || !draft.trim()}
+                  data-ocid="settings.contact.save_button"
+                >
+                  {setContactEmailMutation.isPending ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    "Save"
+                  )}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 h-7 text-xs"
+                  onClick={() => {
+                    setEditing(false);
+                    setDraft("");
+                  }}
+                  data-ocid="settings.contact.cancel_button"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-zinc-300 text-sm flex-1 truncate">
+                {currentEmail}
+              </span>
+              <button
+                type="button"
+                data-ocid="settings.contact.edit_button"
+                onClick={() => {
+                  setDraft(currentEmail);
+                  setEditing(true);
+                }}
+                className="w-7 h-7 flex items-center justify-center rounded hover:bg-zinc-800 text-zinc-600 hover:text-primary"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="text-zinc-300 text-sm">{currentEmail}</p>
+      )}
+      <p className="text-xs text-zinc-600">
+        The "Contact Command" button will open an email to this address.
+        {!isAdmin && " Only admins can change this."}
+      </p>
+    </div>
+  );
+}
+
 function SettingsSheetContent({
   isAdmin,
   lockdownState,
-  contactEmail,
-  onContactEmailChange,
 }: {
   isAdmin: boolean;
   lockdownState: LockdownState | null;
-  contactEmail: string;
-  onContactEmailChange: (v: string) => void;
 }) {
   const [activeTab, setActiveTab] = useState<
     | "contact"
@@ -2361,24 +2532,7 @@ function SettingsSheetContent({
 
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-4">
-          {activeTab === "contact" && (
-            <div className="space-y-3">
-              <p className="text-xs text-zinc-500 uppercase tracking-wider font-mono">
-                Contact Command Email
-              </p>
-              <Input
-                data-ocid="settings.contact.input"
-                type="email"
-                value={contactEmail}
-                onChange={(e) => onContactEmailChange(e.target.value)}
-                placeholder="contact@example.com"
-                className="bg-zinc-900 border-zinc-700 text-zinc-200"
-              />
-              <p className="text-xs text-zinc-600">
-                The "Contact Command" button will open an email to this address.
-              </p>
-            </div>
-          )}
+          {activeTab === "contact" && <ContactEmailSection isAdmin={isAdmin} />}
           {activeTab === "passwords" && isAdmin && (
             <PasswordManagementSection />
           )}
@@ -2405,11 +2559,14 @@ function AppContent() {
   const { data: isAdmin } = useIsAdmin();
   const { data: broadcasts } = useBroadcasts();
   const { data: members } = useMembers();
+  const { data: transactions } = useTransactions();
+  const { data: contactEmailData } = useGetContactEmail();
   const { selectedOfficeId } = useSelectedOffice();
 
   const [dmSheetOpen, setDmSheetOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [contactEmail, setContactEmail] = useState("Gameloverv@gmail.com");
+
+  const contactEmail = contactEmailData ?? "Gameloverv@gmail.com";
 
   // Determine viewer's class level
   const viewerClass = (() => {
@@ -2508,14 +2665,135 @@ function AppContent() {
 
         {/* Scrollable accordion main */}
         <main className="flex-1 overflow-y-auto px-3 py-2 space-y-1.5">
-          <AccordionSection
-            title="Activity Feed (Last 24h)"
-            titleColor="green"
-            defaultOpen={true}
-            ocid="accordion.activity_feed.toggle"
-          >
-            <ActivityFeed />
-          </AccordionSection>
+          {/* Member ID card + debit card — shown when logged in as a member */}
+          {currentMemberId &&
+            (() => {
+              const currentMember = members?.find(
+                (m) => m.id === currentMemberId,
+              );
+              if (!currentMember) return null;
+              const isSpecial = ["unity", "syndelious"].includes(
+                currentMember.name.toLowerCase(),
+              );
+              // Compute fund balance
+              const balance = (() => {
+                if (isSpecial) return null; // ∞
+                const memberTxs = (transactions ?? []).filter(
+                  (tx) =>
+                    tx.memberId === currentMemberId &&
+                    tx.memberId !== "__LOCKDOWN__",
+                );
+                let sum = 0;
+                for (const tx of memberTxs) {
+                  const amt = Number(tx.amount) / 100;
+                  if (tx.type === "donation" || tx.type === "refund") {
+                    sum += amt;
+                  } else {
+                    sum -= amt;
+                  }
+                }
+                return sum;
+              })();
+              const cls = getMemberClass(currentMember);
+              const xut = getMemberXut(currentMember);
+              return (
+                <div className="flex flex-col gap-2 pb-1">
+                  {/* Physical ID card */}
+                  <div
+                    className="relative rounded overflow-hidden border border-zinc-700/60 bg-[#0d0d0d] flex items-center gap-3 p-3"
+                    style={{
+                      background:
+                        "linear-gradient(135deg, #0d0d0d 0%, #1a1200 100%)",
+                    }}
+                  >
+                    {currentMember.idCardImage ? (
+                      <img
+                        src={currentMember.idCardImage}
+                        alt="ID Card"
+                        className="w-14 h-10 object-cover rounded border border-zinc-700 shrink-0"
+                      />
+                    ) : (
+                      <div className="w-14 h-10 rounded border border-zinc-700 bg-zinc-900 flex items-center justify-center shrink-0">
+                        <span className="text-zinc-600 text-xs font-mono">
+                          ID
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-primary font-bold tracking-widest uppercase text-xs font-mono">
+                        XUTION MEMBER
+                      </p>
+                      <p className="text-zinc-200 font-semibold text-sm truncate">
+                        {currentMember.name}
+                      </p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-zinc-500 text-[10px] font-mono">
+                          Class {cls}
+                        </span>
+                        {xut && (
+                          <span className="text-zinc-600 text-[10px] font-mono">
+                            {xut}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="absolute top-1.5 right-2 opacity-20">
+                      <span className="text-primary font-black text-[10px] tracking-[0.3em] uppercase">
+                        XUTION
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Gold debit card */}
+                  <div
+                    className="relative rounded overflow-hidden p-3 flex items-center justify-between"
+                    style={{
+                      background:
+                        "linear-gradient(135deg, oklch(0.55 0.14 75) 0%, oklch(0.45 0.16 60) 40%, oklch(0.60 0.18 80) 100%)",
+                    }}
+                  >
+                    <div>
+                      <p className="text-[10px] font-mono tracking-[0.2em] uppercase text-black/70">
+                        XUTION FUND BALANCE
+                      </p>
+                      <p className="text-black font-black text-xl font-mono">
+                        {balance === null
+                          ? "∞"
+                          : new Intl.NumberFormat("en-US", {
+                              style: "currency",
+                              currency: "USD",
+                              minimumFractionDigits: 2,
+                            }).format(Math.max(0, balance))}
+                      </p>
+                      <p className="text-black/70 text-xs font-medium mt-0.5">
+                        {currentMember.name}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-black font-black tracking-[0.25em] text-sm">
+                        XUTION
+                      </p>
+                      <div className="mt-1 flex gap-0.5 justify-end">
+                        <div className="w-4 h-4 rounded-full bg-black/20" />
+                        <div className="w-4 h-4 rounded-full bg-black/30 -ml-2" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+          {/* Activity Feed — class 6 / admin only */}
+          {isAdmin && (
+            <AccordionSection
+              title="Activity Feed (Last 24h)"
+              titleColor="green"
+              defaultOpen={true}
+              ocid="accordion.activity_feed.toggle"
+            >
+              <ActivityFeed />
+            </AccordionSection>
+          )}
 
           <AccordionSection
             title="Office Selector"
@@ -2661,8 +2939,6 @@ function AppContent() {
             <SettingsSheetContent
               isAdmin={isAdmin ?? false}
               lockdownState={lockdownState}
-              contactEmail={contactEmail}
-              onContactEmailChange={setContactEmail}
             />
           </div>
         </SheetContent>
@@ -2675,8 +2951,10 @@ function AppContent() {
 
 export default function App() {
   return (
-    <SelectedOfficeProvider>
-      <AppContent />
-    </SelectedOfficeProvider>
+    <AuthContextProvider>
+      <SelectedOfficeProvider>
+        <AppContent />
+      </SelectedOfficeProvider>
+    </AuthContextProvider>
   );
 }

@@ -37,12 +37,38 @@ import { toast } from "sonner";
 import type { Policy } from "../backend.d";
 import {
   useAddPolicy,
-  useDeactivatePolicy,
+  useDeletePolicy,
   useIsAdmin,
   usePolicies,
   useUpdatePolicy,
 } from "../hooks/useQueries";
 import { formatDate } from "../utils/format";
+
+const POLICY_CATEGORIES = [
+  "Your ID",
+  "Xution Information",
+  "Security and Abuse",
+  "Dorms",
+  "Technology",
+  "Information",
+  "Recreation",
+  "Offices",
+  "Lab Experiments/Tech/Projects",
+  "Security",
+  "Surveillance",
+  "Garden/Greenhouse",
+  "Training Area",
+  "Armory",
+  "Flight Area",
+  "Bar",
+  "Restaurant",
+  "Gift Shop",
+  "School",
+  "Supply Drop Area",
+  "Library",
+  "Med Bay",
+  "Containment/Jail Cell Area",
+] as const;
 
 function PolicyFormDialog({
   open,
@@ -58,6 +84,7 @@ function PolicyFormDialog({
   const [title, setTitle] = useState(editPolicy?.title ?? "");
   const [content, setContent] = useState(editPolicy?.content ?? "");
   const [category, setCategory] = useState(editPolicy?.category ?? "");
+  const [customCategory, setCustomCategory] = useState("");
 
   const isEditing = !!editPolicy;
   const isPending = addPolicy.isPending || updatePolicy.isPending;
@@ -65,7 +92,8 @@ function PolicyFormDialog({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim() || !content.trim()) return;
-    const safeCategory = category.trim() || "";
+    const finalCategory =
+      category === "__custom__" ? customCategory.trim() : category.trim();
     try {
       if (isEditing) {
         await updatePolicy.mutateAsync({ id: editPolicy.id, title, content });
@@ -75,7 +103,7 @@ function PolicyFormDialog({
           id: crypto.randomUUID(),
           title: title.trim(),
           content: content.trim(),
-          category: safeCategory,
+          category: finalCategory,
         });
         toast.success("Policy added");
       }
@@ -130,14 +158,33 @@ function PolicyFormDialog({
                 Category{" "}
                 <span className="text-zinc-600 normal-case">(optional)</span>
               </Label>
-              <Input
+              <select
                 id="policy-category"
-                data-ocid="policies.category.input"
-                placeholder="HR, Finance, Operations..."
+                data-ocid="policies.category.select"
                 value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className="bg-zinc-900 border-zinc-700 text-zinc-200"
-              />
+                onChange={(e) => {
+                  setCategory(e.target.value);
+                  if (e.target.value !== "__custom__") setCustomCategory("");
+                }}
+                className="w-full h-9 px-3 rounded bg-zinc-900 border border-zinc-700 text-zinc-200 text-sm"
+              >
+                <option value="">— No Category —</option>
+                {POLICY_CATEGORIES.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+                <option value="__custom__">Custom…</option>
+              </select>
+              {category === "__custom__" && (
+                <Input
+                  data-ocid="policies.category.input"
+                  placeholder="Enter custom category..."
+                  value={customCategory}
+                  onChange={(e) => setCustomCategory(e.target.value)}
+                  className="bg-zinc-900 border-zinc-700 text-zinc-200 mt-2"
+                />
+              )}
             </div>
           )}
           <div className="space-y-1.5">
@@ -195,11 +242,11 @@ function PolicyItem({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const deactivate = useDeactivatePolicy();
+  const deletePolicy = useDeletePolicy();
 
   async function handleDelete() {
     try {
-      await deactivate.mutateAsync(policy.id);
+      await deletePolicy.mutateAsync(policy.id);
       toast.success("Policy deleted");
     } catch {
       toast.error("Failed to delete policy");
@@ -276,7 +323,7 @@ function PolicyItem({
                         variant="outline"
                         size="sm"
                         className="h-7 text-xs text-red-400 border-red-500/30 hover:bg-red-500/10"
-                        disabled={deactivate.isPending}
+                        disabled={deletePolicy.isPending}
                       >
                         <Trash2 className="mr-1.5 h-3 w-3" />
                         Delete
@@ -328,8 +375,8 @@ export function PoliciesPage({ isAdmin }: { isAdmin: boolean }) {
   const { data: policies, isLoading } = usePolicies();
   const [addOpen, setAddOpen] = useState(false);
 
-  // Only show active policies
-  const activePolicies = (policies ?? []).filter((p) => p.active);
+  // Show all policies (hard delete means all returned are valid)
+  const allPolicies = policies ?? [];
 
   return (
     <div className="space-y-3">
@@ -354,7 +401,7 @@ export function PoliciesPage({ isAdmin }: { isAdmin: boolean }) {
             <Skeleton key={n} className="w-full h-12 rounded bg-zinc-800" />
           ))}
         </div>
-      ) : activePolicies.length === 0 ? (
+      ) : allPolicies.length === 0 ? (
         <div
           className="text-zinc-600 text-sm py-4 text-center"
           data-ocid="policies.empty_state"
@@ -364,7 +411,7 @@ export function PoliciesPage({ isAdmin }: { isAdmin: boolean }) {
         </div>
       ) : (
         <div className="space-y-1.5">
-          {activePolicies.map((policy, idx) => (
+          {allPolicies.map((policy, idx) => (
             <PolicyItem
               key={policy.id}
               policy={policy}

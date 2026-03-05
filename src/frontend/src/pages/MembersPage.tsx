@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -8,8 +9,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { UserX } from "lucide-react";
+import { Search, UserX } from "lucide-react";
 import { motion } from "motion/react";
+import { useState } from "react";
 import type { Status } from "../backend.d";
 import { Status as StatusEnum } from "../backend.d";
 import { useMembers } from "../hooks/useQueries";
@@ -41,9 +43,14 @@ interface MembersPageProps {
 
 export function MembersPage({ viewerClass }: MembersPageProps) {
   const { data: members, isLoading } = useMembers();
+  const [search, setSearch] = useState("");
 
-  // Class 5+ can see XUT numbers, class 4 and below cannot
+  // Class 5+ can see XUT numbers and ID card thumbnails, class 4 and below cannot
   const canSeeXut = viewerClass >= 5;
+
+  const filtered = (members ?? []).filter((m) =>
+    search.trim() ? m.name.toLowerCase().includes(search.toLowerCase()) : true,
+  );
 
   if (isLoading) {
     return (
@@ -68,78 +75,122 @@ export function MembersPage({ viewerClass }: MembersPageProps) {
   }
 
   return (
-    <div className="overflow-x-auto" data-ocid="members.table">
-      <Table>
-        <TableHeader>
-          <TableRow className="border-zinc-800 hover:bg-transparent">
-            <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
-              Username
-            </TableHead>
-            <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
-              Class
-            </TableHead>
-            {canSeeXut && (
-              <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
-                XUT #
-              </TableHead>
-            )}
-            <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
-              Principal
-            </TableHead>
-            <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
-              Status
-            </TableHead>
-            <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
-              Joined
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {members.map((member, idx) => {
-            const cls = getMemberClass(member);
-            const xut = getMemberXut(member);
-            const clsColor = CLASS_COLORS[cls] ?? CLASS_COLORS[1];
-            return (
-              <motion.tr
-                key={member.id}
-                data-ocid={`members.item.${idx + 1}`}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: idx * 0.03 }}
-                className="border-zinc-800/60 hover:bg-zinc-800/20 transition-colors"
-              >
-                <TableCell className="font-medium text-zinc-200 text-sm">
-                  {member.name}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="outline" className={`text-xs ${clsColor}`}>
-                    {getClassLabel(cls)}
-                  </Badge>
-                </TableCell>
+    <div className="space-y-3">
+      {/* Search bar */}
+      <div className="relative">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600" />
+        <Input
+          data-ocid="members.search_input"
+          placeholder="Search members..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="pl-8 h-8 text-sm bg-zinc-900 border-zinc-700 text-zinc-200"
+        />
+      </div>
+
+      {filtered.length === 0 ? (
+        <div
+          className="py-4 text-center text-zinc-600 text-sm"
+          data-ocid="members.empty_state"
+        >
+          No members match "{search}"
+        </div>
+      ) : (
+        <div className="overflow-x-auto" data-ocid="members.table">
+          <Table>
+            <TableHeader>
+              <TableRow className="border-zinc-800 hover:bg-transparent">
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Username
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Class
+                </TableHead>
                 {canSeeXut && (
-                  <TableCell className="font-mono text-xs text-zinc-400">
-                    {xut || <span className="opacity-40">—</span>}
-                  </TableCell>
+                  <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                    XUT #
+                  </TableHead>
                 )}
-                <TableCell className="font-mono text-xs text-zinc-500">
-                  {truncatePrincipal(member.principal.toString())}
-                </TableCell>
-                <TableCell>
-                  <Badge
-                    variant="outline"
-                    className={`text-xs ${statusStyles[member.status]}`}
+                {canSeeXut && (
+                  <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                    ID Card
+                  </TableHead>
+                )}
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Principal
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Status
+                </TableHead>
+                <TableHead className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Joined
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.map((member, idx) => {
+                const cls = getMemberClass(member);
+                const xut = getMemberXut(member);
+                const clsColor = CLASS_COLORS[cls] ?? CLASS_COLORS[1];
+                return (
+                  <motion.tr
+                    key={member.id}
+                    data-ocid={`members.item.${idx + 1}`}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: idx * 0.03 }}
+                    className="border-zinc-800/60 hover:bg-zinc-800/20 transition-colors"
                   >
-                    {member.status}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-zinc-500 text-xs">
-                  {formatDate(member.joinedAt)}
-                </TableCell>
-              </motion.tr>
-            );
-          })}
-        </TableBody>
-      </Table>
+                    <TableCell className="font-medium text-zinc-200 text-sm">
+                      {member.name}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="outline"
+                        className={`text-xs ${clsColor}`}
+                      >
+                        {getClassLabel(cls)}
+                      </Badge>
+                    </TableCell>
+                    {canSeeXut && (
+                      <TableCell className="font-mono text-xs text-zinc-400">
+                        {xut || <span className="opacity-40">—</span>}
+                      </TableCell>
+                    )}
+                    {canSeeXut && (
+                      <TableCell>
+                        {member.idCardImage ? (
+                          <img
+                            src={member.idCardImage}
+                            alt={`${member.name} ID`}
+                            className="w-10 h-7 object-cover rounded border border-zinc-700"
+                          />
+                        ) : (
+                          <span className="text-zinc-700 text-xs">—</span>
+                        )}
+                      </TableCell>
+                    )}
+                    <TableCell className="font-mono text-xs text-zinc-500">
+                      {truncatePrincipal(member.principal.toString())}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="outline"
+                        className={`text-xs ${statusStyles[member.status]}`}
+                      >
+                        {member.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-zinc-500 text-xs">
+                      {formatDate(member.joinedAt)}
+                    </TableCell>
+                  </motion.tr>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
     </div>
   );
 }
