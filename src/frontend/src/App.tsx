@@ -47,6 +47,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { Principal } from "@dfinity/principal";
 import {
   AlertTriangle,
   Building2,
@@ -77,7 +78,6 @@ import { toast } from "sonner";
 import { BroadcastPriority, Role, TransactionType } from "./backend.d";
 import type { Member } from "./backend.d";
 import { AuthContextProvider, useAuthContext } from "./hooks/useAuthContext";
-import { useInternetIdentity } from "./hooks/useInternetIdentity";
 import {
   useAboutText,
   useAddFacility,
@@ -1894,7 +1894,6 @@ function MemberFormDialog({
   onOpenChange: (v: boolean) => void;
   editMember?: Member;
 }) {
-  const { identity } = useInternetIdentity();
   const createMember = useCreateMember();
   const updateMember = useUpdateMember();
 
@@ -1946,11 +1945,8 @@ function MemberFormDialog({
         });
         toast.success("Member updated");
       } else {
-        const principal = identity?.getPrincipal();
-        if (!principal) {
-          toast.error("Not authenticated");
-          return;
-        }
+        // Use anonymous principal since this app uses password/QR login, not Internet Identity
+        const principal = Principal.anonymous();
         await createMember.mutateAsync({
           id: crypto.randomUUID(),
           name: username,

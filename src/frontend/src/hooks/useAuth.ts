@@ -98,15 +98,17 @@ export function useAuth() {
       try {
         const ok = await actor.verifyPassword(password);
         if (ok) {
-          const token = crypto.randomUUID();
-          await actor.createSession(token, "password", null);
+          // Set session immediately so UI grants Class 6 access even if
+          // createSession call fails (e.g. network issue or backend error)
+          setSession({ type: "password", isAdmin: true });
+          // Persist session token for page-refresh survival (best-effort)
           try {
+            const token = crypto.randomUUID();
+            await actor.createSession(token, "password", null);
             sessionStorage.setItem(SESSION_TOKEN_KEY, token);
           } catch {
-            // ignore
+            // Session persistence failed — login still works in-memory
           }
-          // Password login always grants admin/Class 6 access
-          setSession({ type: "password", isAdmin: true });
         }
         return ok;
       } catch {
